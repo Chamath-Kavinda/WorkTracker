@@ -18,13 +18,55 @@ const FIREBASE_CONFIG = {
   appId:             "1:482821840009:web:9ce9490b49639367713a58",
 };
 
+// ── Sync helpers ──────────────────────────────────────────────────────────────
+
+// Returns true if the data payload has any meaningful content
+function _hasData(data) {
+  return !!(data.tasks?.length || data.sessions?.length ||
+            data.projects?.length || data.versions?.length ||
+            data.plannerTasks?.length);
+}
+
+// Wipe the local electron store
+async function _clearLocalData() {
+  try {
+    await api.saveData({ tasks: [], sessions: [], projects: [], versions: [], plannerTasks: [] });
+  } catch (e) { console.warn('Could not clear local data:', e); }
+}
+
+// Apply a data payload to in-memory state
+function _applyState(data) {
+  state.tasks               = data.tasks         || [];
+  state.sessions            = data.sessions       || [];
+  plannerState.projects     = data.projects       || [];
+  plannerState.versions     = data.versions       || [];
+  plannerState.plannerTasks = data.plannerTasks   || [];
+}
+
+// Merge local + cloud by id union — no duplicates, nothing lost
+function _mergeData(local, cloud) {
+  const mergeArr = (a, b) => {
+    const map = {};
+    [...(a || []), ...(b || [])].forEach(item => { if (item?.id) map[item.id] = item; });
+    return Object.values(map);
+  };
+  return {
+    tasks:        mergeArr(local.tasks,        cloud.tasks),
+    sessions:     mergeArr(local.sessions,     cloud.sessions),
+    projects:     mergeArr(local.projects,     cloud.projects),
+    versions:     mergeArr(local.versions,     cloud.versions),
+    plannerTasks: mergeArr(local.plannerTasks, cloud.plannerTasks),
+  };
+}
+
+// ── Firebase init ─────────────────────────────────────────────────────────────
 async function initFirebase() {
   try {
     if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     fbAuth = firebase.auth();
     fbDb   = firebase.firestore();
 
-    fbAuth.onAuthStateChanged(user => {
+    fbAuth.onAuthStateChanged(async user => {
       currentUser = user;
       updateAuthUI(user);
 
@@ -32,44 +74,83 @@ async function initFirebase() {
       if (_firestoreUnsubscribe) { _firestoreUnsubscribe(); _firestoreUnsubscribe = null; }
 
       if (user && fbDb) {
-        // Start real-time listener — syncs data instantly across all devices
+        // ── SIGNED IN ──────────────────────────────────────────────────────────
+        // 1. Read whatever is in local store (saved while logged out)
+        const localData = await api.loadData();
+        const hasLocal  = _hasData(localData);
+
+        // 2. Read this account's cloud data
+        let cloudData = null;
+        try {
+          const doc = await fbDb.collection('users').doc(user.uid).get();
+          if (doc.exists) cloudData = doc.data();
+        } catch (e) { console.warn('Could not read cloud data:', e); }
+
+        let finalData;
+        if (hasLocal && cloudData) {
+          // Both exist → merge (keeps everything from both, no data lost)
+          finalData = _mergeData(localData, cloudData);
+          showNotif('Local data merged with your account ☁️', 'success');
+        } else if (hasLocal) {
+          // Only local → upload to cloud (first login on this device)
+          finalData = localData;
+          showNotif('Local data saved to your account ☁️', 'success');
+        } else if (cloudData) {
+          // Only cloud → load it (returning user on clean device)
+          finalData = cloudData;
+        } else {
+          // Nothing anywhere → fresh start
+          finalData = { tasks: [], sessions: [], projects: [], versions: [], plannerTasks: [] };
+        }
+
+        // 3. Push merged/final data to cloud
+        try {
+          await fbDb.collection('users').doc(user.uid).set(finalData);
+        } catch (e) { console.warn('Could not push data to cloud:', e); }
+
+        // 4. Wipe local store — cloud is now the single source of truth
+        await _clearLocalData();
+
+        // 5. Apply to in-memory state and render
+        _applyState(finalData);
+        renderAll();
+
+        // 6. Start real-time listener for live cross-device sync
         _firestoreUnsubscribe = fbDb.collection('users').doc(user.uid)
           .onSnapshot(snapshot => {
-            if (snapshot.exists) {
-              const data = snapshot.data();
-              // Only apply if this update came from another device (not us)
-              const incoming = JSON.stringify({ t: data.tasks, s: data.sessions });
-              const current  = JSON.stringify({ t: state.tasks,  s: state.sessions });
-              if (incoming !== current) {
-                state.tasks         = data.tasks         || [];
-                state.sessions      = data.sessions      || [];
-                plannerState.projects     = data.projects     || [];
-                plannerState.versions     = data.versions     || [];
-                plannerState.plannerTasks = data.plannerTasks || [];
-                renderAll();
-              }
-            } else {
-              // No cloud data yet — load from local and push up
-              api.loadData().then(local => {
-                state.tasks         = local.tasks         || [];
-                state.sessions      = local.sessions      || [];
-                plannerState.projects     = local.projects     || [];
-                plannerState.versions     = local.versions     || [];
-                plannerState.plannerTasks = local.plannerTasks || [];
-                renderAll();
-                saveData(); // push local data to cloud on first sign-in
-              });
+            if (!snapshot.exists) return;
+            const data = snapshot.data();
+            const incoming = JSON.stringify({
+              t: data.tasks, s: data.sessions,
+              p: data.projects, v: data.versions, pt: data.plannerTasks
+            });
+            const current = JSON.stringify({
+              t: state.tasks, s: state.sessions,
+              p: plannerState.projects, v: plannerState.versions, pt: plannerState.plannerTasks
+            });
+            if (incoming !== current) {
+              _applyState(data);
+              renderAll();
+              showNotif('Synced from another device 🔄', 'info');
             }
           }, err => {
             console.warn('Firestore real-time sync error:', err);
-            loadData().then(() => renderAll());
           });
-      } else if (!user) {
-        loadData().then(() => renderAll());
+
+      } else {
+        // ── SIGNED OUT ─────────────────────────────────────────────────────────
+        // Clear in-memory state — user must log in to see their data
+        _applyState({ tasks: [], sessions: [], projects: [], versions: [], plannerTasks: [] });
+        // Also wipe local store so no residual data sits on disk
+        await _clearLocalData();
+        renderAll();
       }
     });
   } catch (e) {
     console.warn('Firebase init failed:', e);
+    // Last-resort fallback: load from local if Firebase is completely unreachable
+    await loadData();
+    renderAll();
   }
 }
 
@@ -169,7 +250,7 @@ function showSignOutConfirm() {
       </div>
       <h3 style="margin:0 0 8px;font-size:17px;font-weight:700;color:#fff;">Sign out?</h3>
       <p style="margin:0 0 24px;font-size:13px;color:#888;line-height:1.5;">
-        Your data is synced to the cloud.<br>You can sign back in anytime.
+        Your data stays in the cloud.<br>Local data will be cleared for security.<br>Sign back in anytime to access it.
       </p>
       <div style="display:flex;gap:10px;">
         <button id="signout-cancel-btn" style="flex:1;padding:10px;border-radius:8px;border:1px solid #ffffff18;
@@ -204,12 +285,9 @@ function showSignOutConfirm() {
   overlay.querySelector('#signout-cancel-btn').onclick  = () => overlay.remove();
   overlay.querySelector('#signout-confirm-btn').onclick = async () => {
     overlay.remove();
-    if (_firestoreUnsubscribe) { _firestoreUnsubscribe(); _firestoreUnsubscribe = null; }
+    // onAuthStateChanged handles clearing state + local store automatically
     await fbAuth.signOut();
-    currentUser = null;
-    showNotif('Signed out', 'info');
-    await loadData();
-    renderAll();
+    showNotif('Signed out — data cleared locally', 'info');
   };
   // Close on backdrop click
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
@@ -367,6 +445,7 @@ let state = {
   activeTaskId: null,
   activeSessionStart: null,
   currentFilter: 'all',
+  currentCategoryFilter: 'all',
   currentPage: 'dashboard',
   timerInterval: null,
 };
@@ -408,7 +487,12 @@ function formatDate(iso) {
 }
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  // Use local date components — toISOString() returns UTC which breaks timezone offsets like LK (UTC+5:30)
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function getTaskTotalMs(taskId, forDate = null) {
@@ -463,10 +547,16 @@ async function saveData() {
     versions: plannerState.versions,
     plannerTasks: plannerState.plannerTasks,
   };
-  await api.saveData(payload);
   if (currentUser && fbDb) {
+    // Logged in — save to cloud only (local store stays empty for security)
     try { await fbDb.collection('users').doc(currentUser.uid).set(payload); }
-    catch (e) { console.warn('Firestore save failed:', e); }
+    catch (e) {
+      console.warn('Firestore save failed, buffering locally:', e);
+      await api.saveData(payload); // offline buffer — will merge on next sign-in
+    }
+  } else {
+    // Not logged in — save locally
+    await api.saveData(payload);
   }
 }
 
@@ -547,7 +637,59 @@ function startTimerInterval() {
   clearInterval(state.timerInterval);
   state.timerInterval = setInterval(() => {
     updateLiveTimer();
+    checkMidnightAutoComplete();
   }, 1000);
+}
+
+// ── Midnight auto-complete ────────────────────────────────────────────────────
+// If a task was left running and the date has rolled past midnight,
+// split the session at midnight, mark task completed, and save.
+function checkMidnightAutoComplete() {
+  if (!state.activeTaskId || !state.activeSessionStart) return;
+
+  const startDate = new Date(state.activeSessionStart).toLocaleDateString('en-CA'); // YYYY-MM-DD local
+  const today     = todayStr();
+
+  if (startDate === today) return; // same day, nothing to do
+
+  const task = state.tasks.find(t => t.id === state.activeTaskId);
+
+  // Calculate the midnight boundary (start of today in ms)
+  const midnightToday = new Date(today + 'T00:00:00').getTime();
+
+  // Duration = from session start → midnight of start day
+  const durationUntilMidnight = midnightToday - state.activeSessionStart;
+
+  // Save the session on the OLD date (the day it started)
+  state.sessions.push({
+    id: genId(),
+    taskId: state.activeTaskId,
+    taskName: task?.name || 'Unknown',
+    date: startDate,
+    startTime: new Date(state.activeSessionStart).toISOString(),
+    endTime: new Date(midnightToday - 1).toISOString(), // 23:59:59.999 of that day
+    duration: Math.max(0, durationUntilMidnight),
+    autoCompleted: true,
+  });
+
+  // Mark task completed
+  if (task) task.status = 'completed';
+
+  // Clear active timer state
+  state.activeTaskId = null;
+  state.activeSessionStart = null;
+  clearInterval(state.timerInterval);
+  state.timerInterval = null;
+
+  saveData();
+  renderAll();
+  showNotif(`"${task?.name}" auto-completed at midnight ✅`, 'success');
+}
+
+// Run once on startup to catch any task that was running when the app was closed across midnight
+function autoCompleteOnStartup() {
+  if (!state.activeTaskId || !state.activeSessionStart) return;
+  checkMidnightAutoComplete();
 }
 
 function updateLiveTimer() {
@@ -623,13 +765,17 @@ function renderActiveTimerCard() {
   displayEl.textContent = formatDuration(getTaskTotalMs(task.id));
 }
 
-function createTaskCard(task) {
+function createTaskCard(task, options = {}) {
   const status = getTaskStatus(task);
   const totalMs = getTaskTotalMs(task.id);
   const isRunning = status === 'running';
 
+  // A task is "locked" if it belongs to a past date (cannot be started/paused/stopped)
+  const taskDate = task.date || task.createdAt?.slice(0,10) || todayStr();
+  const isPastDay = taskDate < todayStr() && !isRunning;
+
   const div = document.createElement('div');
-  div.className = `task-card${isRunning ? ' active-tracking' : ''}`;
+  div.className = `task-card${isRunning ? ' active-tracking' : ''}${isPastDay ? ' locked-day' : ''}`;
   div.dataset.taskId = task.id;
 
   const dotClass = { running: 'running', paused: 'paused', completed: 'completed', idle: 'idle' }[status] || 'idle';
@@ -642,11 +788,12 @@ function createTaskCard(task) {
         <span class="task-card-category">${getCategoryEmoji(task.category)} ${task.category}</span>
         ${task.notes ? `<span title="${task.notes}">📝 Note</span>` : ''}
         <span>${formatDate(task.createdAt)}</span>
+        ${isPastDay ? `<span class="task-locked-badge" title="Past day — locked">🔒 Locked</span>` : ''}
       </div>
     </div>
     <div class="task-card-time ${isRunning ? 'running' : ''}">${formatDuration(totalMs)}</div>
     <div class="task-card-actions">
-      ${!isRunning && status !== 'completed'
+      ${!isPastDay && !isRunning && status !== 'completed'
       ? `<button class="task-btn start" title="Start" data-action="start">
             <svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 2l9 5-9 5V2z" fill="currentColor"/></svg>
            </button>`
@@ -656,14 +803,16 @@ function createTaskCard(task) {
             <svg width="12" height="14" viewBox="0 0 12 14"><rect width="4" height="14" rx="2" fill="currentColor"/><rect x="8" width="4" height="14" rx="2" fill="currentColor"/></svg>
            </button>`
       : ''}
-      ${(isRunning || status === 'paused')
+      ${(isRunning || (!isPastDay && status === 'paused'))
       ? `<button class="task-btn stop-btn" title="Stop / Mark Complete" data-action="stop">
             <svg width="13" height="13" viewBox="0 0 13 13"><rect width="13" height="13" rx="2.5" fill="currentColor"/></svg>
            </button>`
       : ''}
-      <button class="task-btn delete hidden" title="Delete task" data-action="delete">
-        <svg width="13" height="13" viewBox="0 0 13 13"><path d="M2 3h9M5 3V2h3v1M5 6v4M8 6v4M3 3l.7 8h5.6L10 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>
-      </button>
+      ${options.showDelete && taskDate >= todayStr()
+      ? `<button class="task-btn delete" title="Delete task" data-action="delete">
+            <svg width="13" height="13" viewBox="0 0 13 13"><path d="M2 3h9M5 3V2h3v1M5 6v4M8 6v4M3 3l.7 8h5.6L10 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>
+           </button>`
+      : ''}
     </div>
   `;
 
@@ -697,7 +846,7 @@ function renderDashboard() {
     return;
   }
 
-  todayTasks.forEach(task => list.appendChild(createTaskCard(task)));
+  todayTasks.forEach(task => list.appendChild(createTaskCard(task, { showDelete: false })));
 
   renderDashboardProjects();
 }
@@ -746,17 +895,40 @@ function renderTasksPage() {
   const list = document.getElementById('tasks-task-list');
   list.innerHTML = '';
 
-  let tasks = [...state.tasks];
+  // ── Render category filter chips ──────────────────────────────────────────
+  const CATEGORIES = ['all','work','meeting','design','development','research','admin','other'];
+  const CAT_LABELS  = { all:'All Categories', work:'💼 Work', meeting:'🗣️ Meeting', design:'🎨 Design',
+                        development:'💻 Development', research:'🔍 Research', admin:'📋 Admin', other:'📌 Other' };
 
-  // Filter
+  const catBar = document.getElementById('tasks-category-bar');
+  if (catBar) {
+    catBar.innerHTML = CATEGORIES.map(c => `
+      <button class="cat-filter-btn${state.currentCategoryFilter === c ? ' active' : ''}" data-cat="${c}">
+        ${CAT_LABELS[c]}
+      </button>`).join('');
+    catBar.querySelectorAll('.cat-filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.currentCategoryFilter = btn.dataset.cat;
+        renderTasksPage();
+      });
+    });
+  }
+
+  // ── Apply status filter ───────────────────────────────────────────────────
+  let tasks = [...state.tasks];
   if (state.currentFilter !== 'all') {
     tasks = tasks.filter(t => {
       const status = getTaskStatus(t);
-      if (state.currentFilter === 'active') return status === 'running';
-      if (state.currentFilter === 'paused') return status === 'paused';
+      if (state.currentFilter === 'active')    return status === 'running';
+      if (state.currentFilter === 'paused')    return status === 'paused';
       if (state.currentFilter === 'completed') return status === 'completed';
       return true;
     });
+  }
+
+  // ── Apply category filter ─────────────────────────────────────────────────
+  if (state.currentCategoryFilter !== 'all') {
+    tasks = tasks.filter(t => (t.category || 'other') === state.currentCategoryFilter);
   }
 
   if (tasks.length === 0) {
@@ -767,7 +939,41 @@ function renderTasksPage() {
     return;
   }
 
-  tasks.forEach(task => list.appendChild(createTaskCard(task)));
+  // ── Group by date (newest first) ──────────────────────────────────────────
+  const today    = todayStr();
+  const yesterday = (() => { const d = new Date(); d.setDate(d.getDate()-1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+
+  const groups = {};
+  tasks.forEach(task => {
+    const key = task.date || task.createdAt?.slice(0,10) || today;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(task);
+  });
+
+  const sortedDates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+
+  sortedDates.forEach(date => {
+    // Date header
+    let label;
+    if (date === today)     label = `Today <span class="date-group-sub">${formatDateFull(date)}</span>`;
+    else if (date === yesterday) label = `Yesterday <span class="date-group-sub">${formatDateFull(date)}</span>`;
+    else                    label = formatDateFull(date);
+
+    const header = document.createElement('div');
+    header.className = 'date-group-header';
+    header.innerHTML = `<span class="date-group-label">${label}</span>
+      <span class="date-group-count">${groups[date].length} task${groups[date].length !== 1 ? 's' : ''}</span>`;
+    list.appendChild(header);
+
+    groups[date].forEach(task => list.appendChild(createTaskCard(task, { showDelete: true })));
+  });
+}
+
+function formatDateFull(iso) {
+  if (!iso) return '';
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 }
 
 function updateDashboardStats() {
@@ -789,6 +995,45 @@ function updateDashboardStats() {
   const todaySessions = state.sessions.filter(s => s.date === today).length;
   const sumSess = document.getElementById('sum-sessions');
   if (sumSess) sumSess.textContent = todaySessions;
+
+  // Day streak — count consecutive calendar days (including today) that have sessions
+  const sumStreak = document.getElementById('sum-streak');
+  if (sumStreak) sumStreak.textContent = calcDayStreak();
+}
+
+function calcDayStreak() {
+  // Collect all unique dates that have at least one session
+  const datesWithWork = new Set(state.sessions.map(s => s.date));
+
+  let streak = 0;
+  const d = new Date();
+
+  // Walk backwards day by day from today
+  // If today has no sessions yet, still allow streak if yesterday does (don't break on today)
+  let checkingToday = true;
+  while (true) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const dateKey = `${y}-${m}-${day}`;
+
+    if (datesWithWork.has(dateKey)) {
+      streak++;
+      checkingToday = false;
+    } else {
+      // Allow skipping today if it has no sessions yet (day just started)
+      if (checkingToday) {
+        checkingToday = false;
+        d.setDate(d.getDate() - 1);
+        continue;
+      }
+      break; // gap found — streak ends
+    }
+
+    d.setDate(d.getDate() - 1);
+    if (streak > 3650) break; // safety cap (10 years)
+  }
+  return streak;
 }
 
 // ── Report ────────────────────────────────────────────────────────────────────
@@ -1315,6 +1560,7 @@ async function init() {
   updateDateDisplay();
   setInterval(updateDateDisplay, 60000);
 
+  autoCompleteOnStartup(); // auto-complete any task left running across midnight
   renderAll();
 
   // Navigation
@@ -1470,18 +1716,13 @@ let plannerState = {
 
 // ── Planner Persistence ───────────────────────────────────────────────────────
 async function loadPlannerData() {
-  const data = await api.loadData();
-  plannerState.projects = data.projects || [];
-  plannerState.versions = data.versions || [];
-  plannerState.plannerTasks = data.plannerTasks || [];
+  // No-op: planner data is loaded by the unified loadData() / initFirebase() sync flow
+  // plannerState is already populated via _applyState() — do not read from local store directly
 }
 
 async function savePlannerData() {
-  const data = await api.loadData();
-  data.projects = plannerState.projects;
-  data.versions = plannerState.versions;
-  data.plannerTasks = plannerState.plannerTasks;
-  await api.saveData(data);
+  // Delegate to the unified saveData() which handles cloud vs local correctly
+  await saveData();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
