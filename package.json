@@ -1,0 +1,45 @@
+{
+  "name": "worktracker",
+  "version": "1.0.0",
+  "description": "Work Time Tracker - Track your tasks with precision",
+  "author": "WorkTracker",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win portable --x64",
+    "build-portable": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.worktracker.app",
+    "productName": "WorkTracker",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "WorkTracker"
+    },
+    "extraResources": []
+  },
+  "devDependencies": {
+    "electron": "^36.3.1",
+    "electron-builder": "^26.0.12"
+  },
+  "dependencies": {
+    "uuid": "^11.1.0"
+  }
+}
