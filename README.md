@@ -31,9 +31,23 @@
 - ✅ Minimize to system tray
 - ✅ All data stored locally (AppData/Roaming/worktracker)
 - ✅ Firebase config section (add your own config for cloud sync)
+- ✅ Calendar view with work session history
+- ✅ Sri Lanka public holidays shown on calendar (live from official gazette data)
+- ✅ Weekend days highlighted separately on calendar
+- ✅ Hover tooltips for holiday names on calendar
+- ✅ Click any calendar day to jump to its report
 
 ## Data Location
 All data is stored at: `%AppData%\worktracker\`
+
+## Holiday Data
+Sri Lanka public holidays are fetched automatically from:
+https://github.com/Dilshan-H/srilanka-holidays
+
+- No API key required
+- Data sourced from official Sri Lankan government gazette
+- Updated every year by the open-source maintainer
+- Cached locally after first load (one fetch per year)
 
 ## Optional: Firebase
 In Settings, enter your Firebase API Key, Project ID, and App ID to enable cloud sync.
