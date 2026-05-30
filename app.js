@@ -572,6 +572,7 @@ function switchPage(page) {
   document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
 
   if (page === 'report') renderReport();
+  if (page === 'calendar') renderCalendar();
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -730,6 +731,71 @@ async function exportReport(format) {
   }
 }
 
+// ── Calendar ──────────────────────────────────────────────────────────────────
+let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth();
+
+function renderCalendar() {
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  document.getElementById('cal-month-label').textContent = `${monthNames[calMonth]} ${calYear}`;
+
+  const firstDay = new Date(calYear, calMonth, 1).getDay();
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const todayStr2 = todayStr();
+
+  // Build session map by date
+  const dateMap = {};
+  state.sessions.forEach(s => {
+    if (!dateMap[s.date]) dateMap[s.date] = { totalMs: 0, tasks: new Set() };
+    dateMap[s.date].totalMs += s.duration;
+    dateMap[s.date].tasks.add(s.taskName);
+  });
+
+  let html = '<div class="cal-grid">';
+
+  // Day headers
+  dayNames.forEach(d => { html += `<div class="cal-day-header">${d}</div>`; });
+
+  // Empty cells before first day
+  for (let i = 0; i < firstDay; i++) {
+    html += `<div class="cal-day empty"></div>`;
+  }
+
+  // Day cells
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateKey = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const isToday = dateKey === todayStr2;
+    const data = dateMap[dateKey];
+    const hasWork = !!data;
+
+    let taskPills = '';
+    if (data) {
+      const taskList = [...data.tasks].slice(0, 2);
+      taskPills = taskList.map(t => `<div class="cal-task-pill">${t}</div>`).join('');
+      if (data.tasks.size > 2) taskPills += `<div class="cal-task-pill">+${data.tasks.size - 2} more</div>`;
+    }
+
+    html += `
+      <div class="cal-day ${isToday ? 'today' : ''} ${hasWork ? 'has-work' : ''}" onclick="switchPage('report'); document.getElementById('report-date').value='${dateKey}'; renderReport('${dateKey}')">
+        <div class="cal-day-num">${d}</div>
+        ${data ? `<div class="cal-day-total">${formatDurationShort(data.totalMs)}</div>` : ''}
+        <div class="cal-day-tasks">${taskPills}</div>
+      </div>`;
+  }
+
+  html += '</div>';
+  html += `
+    <div class="cal-legend">
+      <span><span class="cal-legend-dot" style="background:#7c6af7"></span> Has work sessions</span>
+      <span><span class="cal-legend-dot" style="background:#ffffff30;border:1px solid #7c6af7"></span> Today</span>
+      <span style="color:var(--text-secondary);font-size:11px">Click any day to view its report</span>
+    </div>`;
+
+  document.getElementById('calendar-container').innerHTML = html;
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
   await loadData();
@@ -797,6 +863,18 @@ async function init() {
       state.currentFilter = btn.dataset.filter;
       renderTasksPage();
     });
+  });
+
+  // Calendar nav
+  document.getElementById('cal-prev').addEventListener('click', () => {
+    calMonth--;
+    if (calMonth < 0) { calMonth = 11; calYear--; }
+    renderCalendar();
+  });
+  document.getElementById('cal-next').addEventListener('click', () => {
+    calMonth++;
+    if (calMonth > 11) { calMonth = 0; calYear++; }
+    renderCalendar();
   });
 
   // Report date picker
