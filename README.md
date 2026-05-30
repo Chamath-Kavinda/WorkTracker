@@ -22,15 +22,32 @@
 - Uninstaller included
 
 ## Features
+
+### Time Tracking
 - ✅ Track multiple tasks with precise timers
-- ✅ Only one timer runs at a time (switching auto-pauses others)  
+- ✅ Only one timer runs at a time (switching auto-pauses others)
 - ✅ Pause/resume anytime (lunch break, meetings)
 - ✅ Daily reports with open time, close time, duration per task
-- ✅ Export reports as .txt files & pdf files
+- ✅ Export reports as .txt and .pdf files
+
+### Planner
+- ✅ Project board with Kanban-style version columns
+- ✅ Create and manage projects with custom colors
+- ✅ Add versions with due dates or mark as pending
+- ✅ Add tasks to versions with priority levels (High / Medium / Low)
+- ✅ Mark tasks as done with checkboxes
+- ✅ Versions auto-lock when past due date
+- ✅ Export any project as .txt or styled .pdf report
+- ✅ Projects visible on Dashboard for quick access
+- ✅ Click any Dashboard project to open its board directly
+
+### System
 - ✅ Run at Windows startup (Settings toggle)
 - ✅ Minimize to system tray
 - ✅ All data stored locally (AppData/Roaming/worktracker)
 - ✅ Firebase config section (add your own config for cloud sync)
+
+### Calendar
 - ✅ Calendar view with work session history
 - ✅ Sri Lanka public holidays shown on calendar (live from official gazette data)
 - ✅ Weekend days highlighted separately on calendar
@@ -39,6 +56,13 @@
 
 ## Data Location
 All data is stored at: `%AppData%\worktracker\`
+
+## Export Folders
+Exports are saved to subfolders inside `%AppData%\worktracker\exports\`:
+- `Reports\` — Daily work time reports (.txt and .pdf)
+- `ProjectPlans\` — Planner project exports (.txt and .pdf)
+
+Use the **Open Exports Folder** button in the Report or Planner page to open the folder directly.
 
 ## Holiday Data
 Sri Lanka public holidays are fetched automatically from:
