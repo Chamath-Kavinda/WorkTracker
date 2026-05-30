@@ -133,17 +133,17 @@ function pauseTask(taskId) {
 }
 
 function stopTask(taskId) {
-  if (state.activeTaskId === taskId) {
-    stopCurrentSession(true);
-  } else {
-    // Mark completed even if not running
-    const task = state.tasks.find(t => t.id === taskId);
-    if (task) task.status = 'completed';
-    saveData();
-  }
-  renderAll();
   const task = state.tasks.find(t => t.id === taskId);
-  showNotif(`Stopped: ${task?.name}`, 'success');
+  showConfirm('Stop Task', `Mark "${task?.name || 'this task'}" as complete?`, () => {
+    if (state.activeTaskId === taskId) {
+      stopCurrentSession(true);
+    } else {
+      if (task) task.status = 'completed';
+      saveData();
+    }
+    renderAll();
+    showNotif(`Stopped: ${task?.name}`, 'success');
+  });
 }
 
 function stopCurrentSession(markCompleted) {
@@ -190,11 +190,10 @@ function updateLiveTimer() {
   const display = document.getElementById('active-timer-display');
   if (display) display.textContent = formatDuration(totalMs);
 
-  // Update task card time inline if visible
-  const card = document.querySelector(`[data-task-id="${state.activeTaskId}"] .task-card-time`);
-  if (card) {
+  // Update task card time inline if visible (both dashboard and tasks page)
+  document.querySelectorAll(`[data-task-id="${state.activeTaskId}"] .task-card-time`).forEach(card => {
     card.textContent = formatDuration(totalMs);
-  }
+  });
 
   // Update dashboard stats
   updateDashboardStats();
@@ -610,6 +609,7 @@ function showNotif(msg, type = 'info') {
   const el = document.createElement('div');
   el.className = `notification ${type}`;
   el.textContent = msg;
+  el.title = msg; // show full text on hover if truncated
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 3000);
 }
@@ -1068,32 +1068,6 @@ async function init() {
     showNotif(`Startup ${e.target.checked ? 'enabled' : 'disabled'}`, 'info');
   });
 
-  document.getElementById('btn-export-all').addEventListener('click', async () => {
-    const content = JSON.stringify({ tasks: state.tasks, sessions: state.sessions }, null, 2);
-    const filepath = await api.exportReport({ content, filename: `worktracker-backup-${todayStr()}.json` });
-    showNotif(`Exported: ${filepath}`, 'success');
-  });
-
-  document.getElementById('btn-clear-today').addEventListener('click', () => {
-    showConfirm('Clear Today', "Remove all today's sessions?", () => {
-      state.sessions = state.sessions.filter(s => s.date !== todayStr());
-      if (state.activeTaskId) { stopCurrentSession(false); }
-      saveData();
-      renderAll();
-      showNotif("Today's data cleared", 'info');
-    });
-  });
-
-  document.getElementById('btn-reset-all').addEventListener('click', () => {
-    showConfirm('Reset All Data', 'Delete ALL tasks and sessions permanently?', () => {
-      if (state.activeTaskId) { clearInterval(state.timerInterval); state.activeTaskId = null; state.activeSessionStart = null; }
-      state.tasks = [];
-      state.sessions = [];
-      saveData();
-      renderAll();
-      showNotif('All data reset', 'info');
-    });
-  });
 
   document.getElementById('btn-save-firebase').addEventListener('click', async () => {
     const settings = await api.loadSettings();

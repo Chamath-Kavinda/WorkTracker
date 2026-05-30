@@ -109,7 +109,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 .main-content { grid-area: main; overflow-y: auto; position: relative; isolation: isolate; display: flex; flex-direction: column; }
 
 /* ── Pages ── */
-.page { display: none; padding: 28px 32px; min-height: 100%; }
+.page { display: none; padding: 28px 32px; min-height: 100%; box-sizing: border-box; }
 .page.active { display: block; }
 #page-planner.active { display: flex; }
 
@@ -450,7 +450,11 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
   border: 1px solid var(--border); box-shadow: 0 8px 24px #00000040;
   font-size: 13px; font-weight: 500;
   animation: notif-in 0.3s ease;
-  max-width: 300px;
+  max-width: min(340px, calc(100vw - 40px));
+  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .notification.success { border-color: #10b98140; color: var(--success); }
 .notification.error { border-color: #ef444440; color: var(--danger); }
@@ -577,9 +581,10 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
   color: white; 
 }
 #page-calendar {
-  padding: 28px 20px;
+  padding: 28px 20px 0;
   overflow-x: hidden;
 }
+#page-calendar::after { content: ''; display: block; height: 48px; }
 .cal-holiday-label {
   font-size: 8px;
   color: #f59e0b;
@@ -596,6 +601,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 .hidden { display: none; }
 /* ── Planner ── */
 #page-planner { padding: 28px 32px 0 32px; overflow-x: hidden; overflow-y: auto; flex-direction: column; min-height: 100%; height: auto; }
+#page-planner::after { content: ''; display: block; height: 48px; flex-shrink: 0; }
 
 /* Projects Grid */
 .planner-projects-grid {
