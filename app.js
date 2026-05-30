@@ -330,6 +330,48 @@ function renderDashboard() {
   }
 
   todayTasks.forEach(task => list.appendChild(createTaskCard(task)));
+
+  renderDashboardProjects();
+}
+
+function renderDashboardProjects() {
+  const grid = document.getElementById('dashboard-planner-projects');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  if (plannerState.projects.length === 0) {
+    grid.innerHTML = `<div style="grid-column:1/-1;color:var(--text-muted);font-size:13px;padding:12px 0">No projects yet. Go to Planner to create one.</div>`;
+    return;
+  }
+
+  plannerState.projects.forEach(proj => {
+    const versions = plannerState.versions.filter(v => v.projectId === proj.id);
+    const taskCount = versions.reduce((acc, v) => acc + plannerState.plannerTasks.filter(t => t.versionId === v.id).length, 0);
+    const div = document.createElement('div');
+    div.className = 'planner-project-card';
+    div.style.setProperty('--proj-color', proj.color || PLANNER_COLORS[0]);
+    div.innerHTML = `
+      <div class="proj-card-header">
+        <div class="proj-card-icon" style="--proj-color:${proj.color}">📋</div>
+      </div>
+      <div class="proj-card-name">${proj.name}</div>
+      <div class="proj-card-desc">${proj.desc || 'No description'}</div>
+      <div class="proj-card-meta">
+        <span class="proj-card-meta-item">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M1 5h10M4 1v2M8 1v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          ${versions.length} version${versions.length !== 1 ? 's' : ''}
+        </span>
+        <span class="proj-card-meta-item">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 3.5h8M2 6h6M2 8.5h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          ${taskCount} task${taskCount !== 1 ? 's' : ''}
+        </span>
+      </div>`;
+    div.addEventListener('click', () => {
+      switchPage('planner');
+      openProjectBoard(proj.id);
+    });
+    grid.appendChild(div);
+  });
 }
 
 function renderTasksPage() {
