@@ -593,3 +593,339 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 }
 
 .hidden { display: none; }
+/* ── Planner ── */
+#page-planner { padding: 28px 32px 0 32px; overflow: hidden; display: flex; flex-direction: column; height: 100%; }
+
+/* Projects Grid */
+.planner-projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.planner-project-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+.planner-project-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--proj-color, var(--accent));
+  border-radius: 14px 14px 0 0;
+}
+.planner-project-card:hover {
+  border-color: #ffffff18;
+  background: var(--bg-card-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px #00000030;
+}
+.proj-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.proj-card-icon {
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  background: color-mix(in srgb, var(--proj-color, var(--accent)) 15%, transparent);
+}
+.proj-card-actions { display: flex; gap: 4px; opacity: 0; transition: opacity 0.15s; }
+.planner-project-card:hover .proj-card-actions { opacity: 1; }
+.proj-action-btn {
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.proj-action-btn:hover { background: #ffffff15; color: var(--text-primary); }
+.proj-action-btn.danger:hover { background: #ef444420; color: var(--danger); border-color: #ef444440; }
+.proj-card-name {
+  font-size: 15px; font-weight: 700; margin-bottom: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.proj-card-desc {
+  font-size: 12px; color: var(--text-secondary);
+  margin-bottom: 14px; line-height: 1.5;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.proj-card-meta {
+  display: flex; gap: 12px;
+  font-size: 11px; color: var(--text-muted);
+}
+.proj-card-meta-item {
+  display: flex; align-items: center; gap: 4px;
+}
+
+/* Add Project card */
+.planner-add-project-card {
+  background: transparent;
+  border: 2px dashed var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 120px;
+}
+.planner-add-project-card:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* Kanban Board */
+.planner-board {
+  display: flex;
+  gap: 16px;
+  overflow-x: visible;
+  overflow-y: visible;
+  padding-bottom: 16px;
+  align-items: flex-start;
+  width: max-content;
+  min-width: 100%;
+  min-height: 200px;
+}
+.planner-board::-webkit-scrollbar { height: 5px; }
+.planner-board::-webkit-scrollbar-thumb { background: #ffffff18; border-radius: 4px; }
+
+.planner-version-col {
+  flex-shrink: 0;
+  width: 280px;
+  background: var(--bg-card);
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 180px);
+}
+.planner-version-col.locked {
+  opacity: 0.7;
+}
+.version-col-header {
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+.version-col-header::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--ver-color, var(--accent));
+  border-radius: 14px 14px 0 0;
+}
+.version-col-name {
+  font-size: 14px; font-weight: 700;
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 4px;
+}
+.version-col-meta {
+  font-size: 11px; color: var(--text-secondary);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.version-due-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 20px;
+  border: 1px solid;
+}
+.version-due-badge.ok { background: #10b98115; border-color: #10b98130; color: #10b981; }
+.version-due-badge.soon { background: #f59e0b15; border-color: #f59e0b30; color: #f59e0b; }
+.version-due-badge.overdue { background: #ef444415; border-color: #ef444430; color: #ef4444; }
+.version-due-badge.pending { background: #ffffff08; border-color: var(--border); color: var(--text-muted); }
+.version-locked-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 600; color: var(--danger);
+  padding: 2px 7px; border-radius: 20px;
+  background: #ef444415; border: 1px solid #ef444430;
+}
+.version-col-actions {
+  display: flex; gap: 4px; position: absolute; top: 12px; right: 12px;
+}
+.version-action-btn {
+  width: 24px; height: 24px; border-radius: 5px;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s; font-size: 11px;
+}
+.version-action-btn:hover { background: #ffffff10; color: var(--text-primary); }
+.version-action-btn.danger:hover { background: #ef444420; color: var(--danger); }
+
+.version-tasks-list {
+  padding: 10px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.version-tasks-list::-webkit-scrollbar { width: 3px; }
+
+.planner-task-item {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 11px 13px;
+  cursor: default;
+  transition: all 0.15s;
+  position: relative;
+}
+.planner-task-item:hover { border-color: #ffffff15; background: var(--bg-card-hover); }
+.planner-task-item.locked { opacity: 0.6; pointer-events: none; }
+
+.planner-task-name {
+  font-size: 13px; font-weight: 600;
+  margin-bottom: 4px;
+  padding-right: 48px;
+}
+.planner-task-notes {
+  font-size: 11px; color: var(--text-secondary);
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.planner-task-footer {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 8px;
+}
+.priority-badge {
+  font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 20px;
+  border: 1px solid;
+}
+.priority-badge.high { background: #ef444415; border-color: #ef444430; color: #ef4444; }
+.priority-badge.medium { background: #f59e0b15; border-color: #f59e0b30; color: #f59e0b; }
+.priority-badge.low { background: #10b98115; border-color: #10b98130; color: #10b981; }
+
+.planner-task-item-actions {
+  position: absolute; top: 8px; right: 8px;
+  display: flex; gap: 2px; opacity: 0;
+  transition: opacity 0.15s;
+}
+.planner-task-item:hover .planner-task-item-actions { opacity: 1; }
+.task-mini-btn {
+  width: 22px; height: 22px; border-radius: 5px;
+  border: 1px solid var(--border); background: var(--bg-input);
+  color: var(--text-muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.task-mini-btn:hover { background: #ffffff15; color: var(--text-primary); }
+.task-mini-btn.danger:hover { background: #ef444420; color: var(--danger); }
+
+.version-col-footer {
+  padding: 10px;
+  border-top: 1px solid var(--border);
+}
+.btn-add-version-task {
+  width: 100%; padding: 8px;
+  background: transparent; border: 1px dashed var(--border);
+  border-radius: 8px; color: var(--text-muted);
+  cursor: pointer; font-family: var(--font-ui); font-size: 12px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  transition: all 0.15s;
+}
+.btn-add-version-task:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.btn-add-version-task:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+
+/* Add Version Column */
+.planner-add-version-col {
+  flex-shrink: 0; width: 220px;
+  background: transparent;
+  border: 2px dashed var(--border);
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 8px;
+  cursor: pointer; min-height: 120px;
+  color: var(--text-muted); font-size: 13px; font-weight: 600;
+  transition: all 0.2s; padding: 20px;
+}
+.planner-add-version-col:hover {
+  border-color: var(--accent); color: var(--accent); background: var(--accent-dim);
+}
+
+/* Color picker */
+.planner-color-picker {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.color-swatch {
+  width: 28px; height: 28px; border-radius: 50%;
+  cursor: pointer; border: 3px solid transparent;
+  transition: all 0.15s;
+}
+.color-swatch.selected { border-color: white; transform: scale(1.15); }
+.color-swatch:hover { transform: scale(1.1); }
+
+/* Planner empty state */
+.planner-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; padding: 80px 20px; color: var(--text-muted); text-align: center;
+  grid-column: 1 / -1;
+}
+.planner-empty-icon { opacity: 0.3; }
+.planner-empty h3 { font-size: 16px; color: var(--text-secondary); }
+.planner-empty p { font-size: 13px; max-width: 300px; line-height: 1.6; }
+/* Task tick */
+.task-tick {
+  width: 15px; height: 15px;
+  accent-color: var(--success);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.planner-task-item .planner-task-name {
+  display: flex;
+  align-items: center;
+}
+#planner-version-duedate::-webkit-calendar-picker-indicator {
+  display: none;
+}
+.planner-task-item.done {
+  background: #10b98112;
+  border-color: #10b98130;
+}
+.planner-task-item.done .planner-task-name {
+  color: var(--success);
+  text-decoration: line-through;
+  text-decoration-color: #10b98160;
+}
+.planner-task-item.done .priority-badge {
+  opacity: 0.5;
+}
+#planner-board-view {
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  flex: 1;
+  padding-bottom: 16px;
+}

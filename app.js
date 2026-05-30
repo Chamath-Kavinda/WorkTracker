@@ -84,11 +84,21 @@ async function loadData() {
   const data = await api.loadData();
   state.tasks = data.tasks || [];
   state.sessions = data.sessions || [];
+  // Load planner data
+  plannerState.projects = data.projects || [];
+  plannerState.versions = data.versions || [];
+  plannerState.plannerTasks = data.plannerTasks || [];
   // Restore active task if needed (shouldn't normally survive restart)
 }
 
 async function saveData() {
-  await api.saveData({ tasks: state.tasks, sessions: state.sessions });
+  await api.saveData({
+    tasks: state.tasks,
+    sessions: state.sessions,
+    projects: plannerState.projects,
+    versions: plannerState.versions,
+    plannerTasks: plannerState.plannerTasks,
+  });
 }
 
 // ── Timer Logic ──────────────────────────────────────────────────────────────
@@ -903,7 +913,10 @@ async function init() {
 
   // Navigation
   document.querySelectorAll('[data-page]').forEach(btn => {
-    btn.addEventListener('click', () => switchPage(btn.dataset.page));
+    btn.addEventListener('click', () => {
+      switchPage(btn.dataset.page);
+      if (btn.dataset.page === 'planner') renderPlannerProjects();
+    });
   });
 
   // Window controls
@@ -1058,6 +1071,503 @@ async function init() {
   document.getElementById('confirm-overlay').addEventListener('click', (e) => {
     if (e.target === document.getElementById('confirm-overlay')) hideConfirm();
   });
+
+  // Init Planner
+  initPlanner();
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ── Planner ────────────────────────────────────────────────────────────────────
+
+const PLANNER_COLORS = [
+  '#7c6af7', '#22d3ee', '#10b981', '#f59e0b', '#ef4444',
+  '#ec4899', '#8b5cf6', '#06b6d4', '#14b8a6', '#f97316',
+];
+
+let plannerState = {
+  projects: [],       // { id, name, desc, color, createdAt }
+  versions: [],       // { id, projectId, name, desc, dueDate, pending, createdAt }
+  plannerTasks: [],   // { id, versionId, name, notes, priority, createdAt }
+  currentProjectId: null,
+  editingProjectId: null,
+  editingVersionId: null,
+  editingPlannerTaskId: null,
+  editingVersionTaskTarget: null, // versionId for new task
+  selectedColor: PLANNER_COLORS[0],
+};
+
+// ── Planner Persistence ───────────────────────────────────────────────────────
+async function loadPlannerData() {
+  const data = await api.loadData();
+  plannerState.projects = data.projects || [];
+  plannerState.versions = data.versions || [];
+  plannerState.plannerTasks = data.plannerTasks || [];
+}
+
+async function savePlannerData() {
+  const data = await api.loadData();
+  data.projects = plannerState.projects;
+  data.versions = plannerState.versions;
+  data.plannerTasks = plannerState.plannerTasks;
+  await api.saveData(data);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function isVersionLocked(version) {
+  if (!version.dueDate || version.pending) return false;
+  const due = new Date(version.dueDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  due.setHours(0, 0, 0, 0);
+  return due <= today;
+}
+
+function getDueBadge(version) {
+  if (version.pending || !version.dueDate) {
+    return `<span class="version-due-badge pending">⏳ Pending</span>`;
+  }
+  const due = new Date(version.dueDate);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.ceil((due - today) / 86400000);
+  if (diff < 0) return `<span class="version-due-badge overdue">🔒 Overdue · ${formatShortDate(version.dueDate)}</span>`;
+  if (diff === 0) return `<span class="version-due-badge soon">⚠ Due Today</span>`;
+  if (diff <= 7) return `<span class="version-due-badge soon">⚠ ${diff}d left · ${formatShortDate(version.dueDate)}</span>`;
+  return `<span class="version-due-badge ok">📅 ${formatShortDate(version.dueDate)}</span>`;
+}
+
+function formatShortDate(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// ── Render Projects ───────────────────────────────────────────────────────────
+function renderPlannerProjects() {
+  const grid = document.getElementById('planner-projects-grid');
+  grid.innerHTML = '';
+
+  document.getElementById('planner-page-title').textContent = 'Planner';
+  document.getElementById('planner-page-subtitle').textContent = 'Manage your projects and versions';
+  document.getElementById('btn-planner-new-label').textContent = 'New Project';
+  document.getElementById('btn-planner-back').style.display = 'none';
+  document.getElementById('planner-projects-view').style.display = '';
+  document.getElementById('planner-board-view').style.display = 'none';
+  plannerState.currentProjectId = null;
+
+  if (plannerState.projects.length === 0) {
+    grid.innerHTML = `
+      <div class="planner-empty">
+        <div class="planner-empty-icon">
+          <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+            <rect x="4" y="8" width="48" height="40" rx="6" stroke="#ffffff20" stroke-width="2"/>
+            <rect x="12" y="16" width="12" height="24" rx="3" stroke="#ffffff15" stroke-width="1.5"/>
+            <rect x="28" y="20" width="12" height="20" rx="3" stroke="#ffffff15" stroke-width="1.5"/>
+            <rect x="44" y="24" width="6" height="16" rx="2" stroke="#ffffff15" stroke-width="1.5"/>
+          </svg>
+        </div>
+        <h3>No projects yet</h3>
+        <p>Create your first project to start planning versions and tasks.</p>
+      </div>`;
+  } else {
+    plannerState.projects.forEach(proj => {
+      const versions = plannerState.versions.filter(v => v.projectId === proj.id);
+      const taskCount = versions.reduce((acc, v) => acc + plannerState.plannerTasks.filter(t => t.versionId === v.id).length, 0);
+      const div = document.createElement('div');
+      div.className = 'planner-project-card';
+      div.style.setProperty('--proj-color', proj.color || PLANNER_COLORS[0]);
+      div.innerHTML = `
+        <div class="proj-card-header">
+          <div class="proj-card-icon" style="--proj-color:${proj.color}">📋</div>
+          <div class="proj-card-actions">
+            <button class="proj-action-btn" title="Edit" data-action="edit"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8 2l2 2-6 6H2V8l6-6z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></button>
+            <button class="proj-action-btn danger" title="Delete" data-action="delete"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M4.5 3V2h3v1M4.5 5.5v3.5M7.5 5.5v3.5M3 3l.5 7.5h5L9 3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg></button>
+          </div>
+        </div>
+        <div class="proj-card-name">${proj.name}</div>
+        <div class="proj-card-desc">${proj.desc || 'No description'}</div>
+        <div class="proj-card-meta">
+          <span class="proj-card-meta-item">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M1 5h10M4 1v2M8 1v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            ${versions.length} version${versions.length !== 1 ? 's' : ''}
+          </span>
+          <span class="proj-card-meta-item">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 3.5h8M2 6h6M2 8.5h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            ${taskCount} task${taskCount !== 1 ? 's' : ''}
+          </span>
+        </div>`;
+      div.addEventListener('click', (e) => {
+        if (e.target.closest('[data-action]')) return;
+        openProjectBoard(proj.id);
+      });
+      div.querySelector('[data-action="edit"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        openProjectModal(proj.id);
+      });
+      div.querySelector('[data-action="delete"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        showConfirm('Delete Project', `Delete "${proj.name}" and all its versions and tasks?`, () => {
+          const vids = plannerState.versions.filter(v => v.projectId === proj.id).map(v => v.id);
+          plannerState.plannerTasks = plannerState.plannerTasks.filter(t => !vids.includes(t.versionId));
+          plannerState.versions = plannerState.versions.filter(v => v.projectId !== proj.id);
+          plannerState.projects = plannerState.projects.filter(p => p.id !== proj.id);
+          savePlannerData();
+          renderPlannerProjects();
+          showNotif('Project deleted', 'info');
+        });
+      });
+      grid.appendChild(div);
+    });
+  }
+
+  // Add card
+  const addCard = document.createElement('div');
+  addCard.className = 'planner-add-project-card';
+  addCard.innerHTML = `<svg width="18" height="18" viewBox="0 0 18 18"><path d="M9 2v14M2 9h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> New Project`;
+  addCard.addEventListener('click', () => openProjectModal(null));
+  grid.appendChild(addCard);
+}
+
+// ── Render Board ──────────────────────────────────────────────────────────────
+function openProjectBoard(projectId) {
+  plannerState.currentProjectId = projectId;
+  const proj = plannerState.projects.find(p => p.id === projectId);
+  if (!proj) return;
+
+  document.getElementById('planner-page-title').textContent = proj.name;
+  document.getElementById('planner-page-subtitle').textContent = proj.desc || 'Project board';
+  document.getElementById('btn-planner-new-label').textContent = 'New Version';
+  document.getElementById('btn-planner-back').style.display = '';
+  document.getElementById('planner-projects-view').style.display = 'none';
+  document.getElementById('planner-board-view').style.display = '';
+
+  renderBoard();
+}
+
+function renderBoard() {
+  const projectId = plannerState.currentProjectId;
+  const board = document.getElementById('planner-board');
+  board.innerHTML = '';
+
+  const versions = plannerState.versions.filter(v => v.projectId === projectId);
+
+  if (versions.length === 0) {
+    board.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:80px 20px;color:var(--text-muted);text-align:center;min-width:100%">
+      <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><rect x="6" y="8" width="36" height="32" rx="4" stroke="#ffffff20" stroke-width="2"/><rect x="12" y="14" width="10" height="20" rx="2" stroke="#ffffff15" stroke-width="1.5"/><rect x="26" y="18" width="10" height="16" rx="2" stroke="#ffffff15" stroke-width="1.5"/></svg>
+      <div style="font-size:14px;font-weight:600;color:var(--text-secondary)">No versions yet</div>
+      <div style="font-size:12px">Add a version to start planning tasks.</div>
+    </div>`;
+  } else {
+    versions.forEach(ver => {
+      const tasks = plannerState.plannerTasks.filter(t => t.versionId === ver.id);
+      const locked = isVersionLocked(ver);
+      const proj = plannerState.projects.find(p => p.id === projectId);
+      const verColor = proj?.color || PLANNER_COLORS[0];
+
+      const col = document.createElement('div');
+      col.className = `planner-version-col${locked ? ' locked' : ''}`;
+      col.style.setProperty('--ver-color', verColor);
+
+      const lockIcon = locked ? `<span class="version-locked-badge">🔒 Locked</span>` : '';
+
+      col.innerHTML = `
+        <div class="version-col-header">
+          <div class="version-col-actions">
+            ${!locked ? `<button class="version-action-btn" title="Edit version" data-action="edit-ver">
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M7 2l2 2-5 5H2V7l5-5z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>
+            </button>` : ''}
+            <button class="version-action-btn danger" title="Delete version" data-action="delete-ver">
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1.5 2.5h8M4 2.5V2h3v.5M4 4.5v4M7 4.5v4M2.5 2.5l.5 7h5l.5-7" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="version-col-name">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="2" width="12" height="10" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M1 5h12" stroke="currentColor" stroke-width="1.3"/></svg>
+            ${ver.name}
+          </div>
+          <div class="version-col-meta">
+            ${getDueBadge(ver)}
+            ${lockIcon}
+          </div>
+          ${ver.desc ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.4">${ver.desc}</div>` : ''}
+        </div>
+        <div class="version-tasks-list" id="vtasks-${ver.id}"></div>
+        <div class="version-col-footer">
+          <button class="btn-add-version-task" data-ver-id="${ver.id}" ${locked ? 'disabled' : ''}>
+            <svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Add task
+          </button>
+        </div>`;
+
+      // Render tasks
+      const taskList = col.querySelector(`#vtasks-${ver.id}`);
+      if (tasks.length === 0) {
+        taskList.innerHTML = `<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:16px 0">No tasks</div>`;
+      } else {
+        tasks.forEach(task => {
+          const item = document.createElement('div');
+          item.className = `planner-task-item${locked ? ' locked' : ''}${task.done ? ' done' : ''}`;
+          item.innerHTML = `
+          <div class="planner-task-item-actions">
+            ${!locked ? `<button class="task-mini-btn" title="Edit" data-action="edit-task" data-task-id="${task.id}">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M6.5 1.5l2 2-5 5H1.5v-2l5-5z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>
+            </button>` : ''}
+            <button class="task-mini-btn danger" title="Delete" data-action="delete-task" data-task-id="${task.id}">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2.5h6M3.5 2.5V2h3v.5M3.5 4v3.5M6.5 4v3.5M2.5 2.5l.4 5.5h4.2l.4-5.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="planner-task-name">
+            <input type="checkbox" class="task-tick" ${task.done ? 'checked' : ''} ${locked ? 'disabled' : ''} />
+            ${task.name}
+          </div>
+          ${task.notes ? `<div class="planner-task-notes">${task.notes}</div>` : ''}
+          <div class="planner-task-footer">
+            <span class="priority-badge ${task.priority || 'medium'}">${{ high: '🔴 High', medium: '🟡 Medium', low: '🟢 Low' }[task.priority || 'medium']}</span>
+          </div>`;
+
+          const tick = item.querySelector('.task-tick');
+          tick?.addEventListener('change', () => {
+            task.done = tick.checked;
+            savePlannerData();
+            item.classList.toggle('done', task.done);
+          });
+          if (!locked) {
+            item.querySelector('[data-action="edit-task"]')?.addEventListener('click', () => openPlannerTaskModal(ver.id, task.id));
+          }
+          item.querySelector('[data-action="delete-task"]').addEventListener('click', () => {
+            if (locked) return;
+            showConfirm('Delete Task', `Delete "${task.name}"?`, () => {
+              plannerState.plannerTasks = plannerState.plannerTasks.filter(t => t.id !== task.id);
+              savePlannerData();
+              renderBoard();
+              showNotif('Task deleted', 'info');
+            });
+          });
+          taskList.appendChild(item);
+        });
+      }
+
+      // Version actions
+      col.querySelector('[data-action="edit-ver"]')?.addEventListener('click', () => openVersionModal(ver.id));
+      col.querySelector('[data-action="delete-ver"]').addEventListener('click', () => {
+        showConfirm('Delete Version', `Delete "${ver.name}" and all its tasks?`, () => {
+          plannerState.plannerTasks = plannerState.plannerTasks.filter(t => t.versionId !== ver.id);
+          plannerState.versions = plannerState.versions.filter(v => v.id !== ver.id);
+          savePlannerData();
+          renderBoard();
+          showNotif('Version deleted', 'info');
+        });
+      });
+      col.querySelector('.btn-add-version-task')?.addEventListener('click', () => openPlannerTaskModal(ver.id, null));
+
+      board.appendChild(col);
+    });
+  }
+
+  // Add version column
+  const addCol = document.createElement('div');
+  addCol.className = 'planner-add-version-col';
+  addCol.innerHTML = `<svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3v14M3 10h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>New Version`;
+  addCol.addEventListener('click', () => openVersionModal(null));
+  board.appendChild(addCol);
+}
+
+// ── Project Modal ─────────────────────────────────────────────────────────────
+function openProjectModal(projectId) {
+  plannerState.editingProjectId = projectId;
+  const proj = projectId ? plannerState.projects.find(p => p.id === projectId) : null;
+
+  document.getElementById('planner-project-modal-title').textContent = proj ? 'Edit Project' : 'New Project';
+  document.getElementById('planner-project-name').value = proj?.name || '';
+  document.getElementById('planner-project-desc').value = proj?.desc || '';
+  plannerState.selectedColor = proj?.color || PLANNER_COLORS[0];
+
+  // Render color picker
+  const picker = document.getElementById('planner-project-color-picker');
+  picker.innerHTML = '';
+  PLANNER_COLORS.forEach(c => {
+    const sw = document.createElement('div');
+    sw.className = `color-swatch${c === plannerState.selectedColor ? ' selected' : ''}`;
+    sw.style.background = c;
+    sw.addEventListener('click', () => {
+      plannerState.selectedColor = c;
+      picker.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('selected', s.style.background === c || s.style.backgroundColor === c));
+    });
+    picker.appendChild(sw);
+  });
+
+  document.getElementById('planner-project-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('planner-project-name').focus(), 50);
+}
+
+function closePlannerProjectModal() {
+  document.getElementById('planner-project-modal').style.display = 'none';
+}
+
+function savePlannerProject() {
+  const name = document.getElementById('planner-project-name').value.trim();
+  if (!name) { showNotif('Project name required', 'error'); return; }
+  const desc = document.getElementById('planner-project-desc').value.trim();
+  const color = plannerState.selectedColor;
+
+  if (plannerState.editingProjectId) {
+    const proj = plannerState.projects.find(p => p.id === plannerState.editingProjectId);
+    if (proj) { proj.name = name; proj.desc = desc; proj.color = color; }
+    showNotif('Project updated', 'success');
+  } else {
+    plannerState.projects.push({ id: genId(), name, desc, color, createdAt: new Date().toISOString() });
+    showNotif('Project created', 'success');
+  }
+  savePlannerData();
+  closePlannerProjectModal();
+  renderPlannerProjects();
+}
+
+// ── Version Modal ─────────────────────────────────────────────────────────────
+function openVersionModal(versionId) {
+  plannerState.editingVersionId = versionId;
+  const ver = versionId ? plannerState.versions.find(v => v.id === versionId) : null;
+
+  document.getElementById('planner-version-modal-title').textContent = ver ? 'Edit Version' : 'New Version';
+  document.getElementById('planner-version-name').value = ver?.name || '';
+  document.getElementById('planner-version-desc').value = ver?.desc || '';
+  document.getElementById('planner-version-duedate').value = ver?.dueDate || '';
+  document.getElementById('planner-version-pending').checked = ver ? (ver.pending || !ver.dueDate) : true;
+
+  updateVersionDueDateState();
+
+  document.getElementById('planner-version-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('planner-version-name').focus(), 50);
+}
+
+function updateVersionDueDateState() {
+  const pending = document.getElementById('planner-version-pending').checked;
+  const dateInput = document.getElementById('planner-version-duedate');
+  dateInput.disabled = pending;
+  dateInput.style.opacity = pending ? '0.4' : '1';
+  if (pending) dateInput.value = '';   // ← add this
+}
+
+function closePlannerVersionModal() {
+  document.getElementById('planner-version-modal').style.display = 'none';
+}
+
+function savePlannerVersion() {
+  const name = document.getElementById('planner-version-name').value.trim();
+  if (!name) { showNotif('Version name required', 'error'); return; }
+  const desc = document.getElementById('planner-version-desc').value.trim();
+  const pending = document.getElementById('planner-version-pending').checked;
+  const dueDate = pending ? null : (document.getElementById('planner-version-duedate').value || null);
+
+  if (plannerState.editingVersionId) {
+    const ver = plannerState.versions.find(v => v.id === plannerState.editingVersionId);
+    if (ver) { ver.name = name; ver.desc = desc; ver.pending = pending; ver.dueDate = dueDate; }
+    showNotif('Version updated', 'success');
+  } else {
+    plannerState.versions.push({
+      id: genId(), projectId: plannerState.currentProjectId,
+      name, desc, dueDate, pending,
+      createdAt: new Date().toISOString(),
+    });
+    showNotif('Version created', 'success');
+  }
+  savePlannerData();
+  closePlannerVersionModal();
+  renderBoard();
+}
+
+// ── Planner Task Modal ────────────────────────────────────────────────────────
+function openPlannerTaskModal(versionId, taskId) {
+  plannerState.editingVersionTaskTarget = versionId;
+  plannerState.editingPlannerTaskId = taskId;
+  const task = taskId ? plannerState.plannerTasks.find(t => t.id === taskId) : null;
+
+  document.getElementById('planner-task-modal-title').textContent = task ? 'Edit Task' : 'Add Task';
+  document.getElementById('planner-task-name').value = task?.name || '';
+  document.getElementById('planner-task-notes').value = task?.notes || '';
+  document.getElementById('planner-task-priority').value = task?.priority || 'medium';
+
+  document.getElementById('planner-task-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('planner-task-name').focus(), 50);
+}
+
+function closePlannerTaskModal() {
+  document.getElementById('planner-task-modal').style.display = 'none';
+}
+
+function savePlannerTask() {
+  const name = document.getElementById('planner-task-name').value.trim();
+  if (!name) { showNotif('Task name required', 'error'); return; }
+  const notes = document.getElementById('planner-task-notes').value.trim();
+  const priority = document.getElementById('planner-task-priority').value;
+
+  if (plannerState.editingPlannerTaskId) {
+    const task = plannerState.plannerTasks.find(t => t.id === plannerState.editingPlannerTaskId);
+    if (task) { task.name = name; task.notes = notes; task.priority = priority; }
+    showNotif('Task updated', 'success');
+  } else {
+    plannerState.plannerTasks.push({
+      id: genId(),
+      versionId: plannerState.editingVersionTaskTarget,
+      name, notes, priority,
+      done: false,           // ← add this
+      createdAt: new Date().toISOString(),
+    });
+    showNotif('Task added', 'success');
+  }
+  savePlannerData();
+  closePlannerTaskModal();
+  renderBoard();
+}
+
+// ── Planner Init ──────────────────────────────────────────────────────────────
+function initPlanner() {
+  // New project/version button
+  document.getElementById('btn-planner-new').addEventListener('click', () => {
+    if (plannerState.currentProjectId) openVersionModal(null);
+    else openProjectModal(null);
+  });
+
+  // Back button
+  document.getElementById('btn-planner-back').addEventListener('click', renderPlannerProjects);
+
+  // Project modal
+  document.getElementById('planner-project-modal-close').addEventListener('click', closePlannerProjectModal);
+  document.getElementById('planner-project-modal-cancel').addEventListener('click', closePlannerProjectModal);
+  document.getElementById('planner-project-modal-save').addEventListener('click', savePlannerProject);
+  document.getElementById('planner-project-modal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closePlannerProjectModal();
+  });
+  document.getElementById('planner-project-name').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') savePlannerProject();
+    if (e.key === 'Escape') closePlannerProjectModal();
+  });
+
+  // Version modal
+  document.getElementById('planner-version-modal-close').addEventListener('click', closePlannerVersionModal);
+  document.getElementById('planner-version-modal-cancel').addEventListener('click', closePlannerVersionModal);
+  document.getElementById('planner-version-modal-save').addEventListener('click', savePlannerVersion);
+  document.getElementById('planner-version-modal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closePlannerVersionModal();
+  });
+  document.getElementById('planner-version-pending').addEventListener('change', updateVersionDueDateState);
+  document.getElementById('planner-version-name').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closePlannerVersionModal();
+  });
+  document.getElementById('planner-version-duedate').addEventListener('change', () => {
+    if (document.getElementById('planner-version-duedate').value) {
+      document.getElementById('planner-version-pending').checked = false;
+      updateVersionDueDateState();
+    }
+  });
+
+  // Task modal
+  document.getElementById('planner-task-modal-close').addEventListener('click', closePlannerTaskModal);
+  document.getElementById('planner-task-modal-cancel').addEventListener('click', closePlannerTaskModal);
+  document.getElementById('planner-task-modal-save').addEventListener('click', savePlannerTask);
+  document.getElementById('planner-task-modal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closePlannerTaskModal();
+  });
+  document.getElementById('planner-task-name').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') savePlannerTask();
+    if (e.key === 'Escape') closePlannerTaskModal();
+  });
+}
