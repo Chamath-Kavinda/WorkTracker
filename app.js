@@ -2,6 +2,364 @@
 
 const api = window.electronAPI;
 
+// ── Firebase Auth ─────────────────────────────────────────────────────────────
+let fbAuth = null;
+let fbDb   = null;
+let currentUser = null;
+let _firestoreUnsubscribe = null; // real-time listener handle
+
+// Hardcoded Firebase config (no settings UI needed)
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyBbH6td0Q4eTa4JXLDhoMk8gfNpS1m5INQ",
+  authDomain:        "worktracker-29228.firebaseapp.com",
+  projectId:         "worktracker-29228",
+  storageBucket:     "worktracker-29228.firebasestorage.app",
+  messagingSenderId: "482821840009",
+  appId:             "1:482821840009:web:9ce9490b49639367713a58",
+};
+
+async function initFirebase() {
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    fbAuth = firebase.auth();
+    fbDb   = firebase.firestore();
+
+    fbAuth.onAuthStateChanged(user => {
+      currentUser = user;
+      updateAuthUI(user);
+
+      // Tear down any previous real-time listener
+      if (_firestoreUnsubscribe) { _firestoreUnsubscribe(); _firestoreUnsubscribe = null; }
+
+      if (user && fbDb) {
+        // Start real-time listener — syncs data instantly across all devices
+        _firestoreUnsubscribe = fbDb.collection('users').doc(user.uid)
+          .onSnapshot(snapshot => {
+            if (snapshot.exists) {
+              const data = snapshot.data();
+              // Only apply if this update came from another device (not us)
+              const incoming = JSON.stringify({ t: data.tasks, s: data.sessions });
+              const current  = JSON.stringify({ t: state.tasks,  s: state.sessions });
+              if (incoming !== current) {
+                state.tasks         = data.tasks         || [];
+                state.sessions      = data.sessions      || [];
+                plannerState.projects     = data.projects     || [];
+                plannerState.versions     = data.versions     || [];
+                plannerState.plannerTasks = data.plannerTasks || [];
+                renderAll();
+              }
+            } else {
+              // No cloud data yet — load from local and push up
+              api.loadData().then(local => {
+                state.tasks         = local.tasks         || [];
+                state.sessions      = local.sessions      || [];
+                plannerState.projects     = local.projects     || [];
+                plannerState.versions     = local.versions     || [];
+                plannerState.plannerTasks = local.plannerTasks || [];
+                renderAll();
+                saveData(); // push local data to cloud on first sign-in
+              });
+            }
+          }, err => {
+            console.warn('Firestore real-time sync error:', err);
+            loadData().then(() => renderAll());
+          });
+      } else if (!user) {
+        loadData().then(() => renderAll());
+      }
+    });
+  } catch (e) {
+    console.warn('Firebase init failed:', e);
+  }
+}
+
+// ── Auth actions ──────────────────────────────────────────────────────────────
+async function signInWithGoogle() {
+  if (!fbAuth) return;
+  clearAuthError();
+
+  // Show a loading state on the Google button
+  const googleBtn = document.getElementById('btn-google-signin');
+  const originalHTML = googleBtn.innerHTML;
+  googleBtn.disabled = true;
+  googleBtn.innerHTML = `<span style="display:flex;align-items:center;gap:10px;justify-content:center">
+    <span style="width:16px;height:16px;border:2px solid #33333350;border-top-color:#333;border-radius:50%;animation:spin .7s linear infinite;display:inline-block"></span>
+    Connecting to Google...
+  </span>`;
+
+  try {
+    // Use Electron's main-process window to handle Google OAuth
+    // This avoids the popup-blocked issue in Electron's renderer
+    const result = await api.googleSignIn();
+
+    if (result && (result.accessToken || result.idToken)) {
+      const credential = firebase.auth.GoogleAuthProvider.credential(
+        result.idToken    || null,
+        result.accessToken || null
+      );
+      await fbAuth.signInWithCredential(credential);
+      hideAuthModal();
+      showNotif('Signed in with Google!', 'success');
+      return;
+    }
+
+    showAuthError('Google sign-in did not complete. Please try again.');
+  } catch (e) {
+    if (e.message === 'auth-port-busy') {
+      showAuthError('Sign-in port is busy. Please wait a moment and try again.');
+    } else if (e.message === 'auth/popup-closed-by-user') {
+      // User just closed the window — no error needed
+    } else {
+      showAuthError(friendlyAuthError(e.code) || e.message);
+    }
+  } finally {
+    googleBtn.disabled = false;
+    googleBtn.innerHTML = originalHTML;
+  }
+}
+
+async function signInWithEmail(email, password) {
+  if (!fbAuth) return;
+  setAuthLoading(true);
+  try {
+    await fbAuth.signInWithEmailAndPassword(email, password);
+    hideAuthModal();
+    showNotif('Signed in!', 'success');
+  } catch (e) {
+    showAuthError(friendlyAuthError(e.code));
+  } finally { setAuthLoading(false); }
+}
+
+async function registerWithEmail(email, password, displayName) {
+  if (!fbAuth) return;
+  setAuthLoading(true);
+  try {
+    const cred = await fbAuth.createUserWithEmailAndPassword(email, password);
+    if (displayName) await cred.user.updateProfile({ displayName });
+    hideAuthModal();
+    showNotif('Account created! Welcome 🎉', 'success');
+  } catch (e) {
+    showAuthError(friendlyAuthError(e.code));
+  } finally { setAuthLoading(false); }
+}
+
+async function doSignOut() {
+  if (!fbAuth) return;
+  showSignOutConfirm();
+}
+
+function showSignOutConfirm() {
+  // Remove any existing confirm dialog
+  document.getElementById('signout-confirm-overlay')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'signout-confirm-overlay';
+  overlay.style.cssText = `
+    position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    animation:fadeIn .15s ease;
+  `;
+  overlay.innerHTML = `
+    <div style="background:#1a1a24;border:1px solid #ffffff14;border-radius:14px;
+                padding:28px 32px;width:340px;text-align:center;
+                animation:slideUp .2s ease;">
+      <div style="width:48px;height:48px;border-radius:50%;background:#ef444415;
+                  display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:22px;">
+        🔓
+      </div>
+      <h3 style="margin:0 0 8px;font-size:17px;font-weight:700;color:#fff;">Sign out?</h3>
+      <p style="margin:0 0 24px;font-size:13px;color:#888;line-height:1.5;">
+        Your data is synced to the cloud.<br>You can sign back in anytime.
+      </p>
+      <div style="display:flex;gap:10px;">
+        <button id="signout-cancel-btn" style="flex:1;padding:10px;border-radius:8px;border:1px solid #ffffff18;
+                background:none;color:#ccc;cursor:pointer;font-size:14px;font-weight:500;
+                transition:background .15s;">
+          Cancel
+        </button>
+        <button id="signout-confirm-btn" style="flex:1;padding:10px;border-radius:8px;border:none;
+                background:#ef4444;color:#fff;cursor:pointer;font-size:14px;font-weight:600;
+                transition:opacity .15s;">
+          Sign Out
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Add keyframe animations
+  if (!document.getElementById('signout-confirm-styles')) {
+    const style = document.createElement('style');
+    style.id = 'signout-confirm-styles';
+    style.textContent = `
+      @keyframes fadeIn  { from { opacity:0 } to { opacity:1 } }
+      @keyframes slideUp { from { transform:translateY(16px);opacity:0 } to { transform:translateY(0);opacity:1 } }
+      #signout-cancel-btn:hover  { background:#ffffff10 !important; }
+      #signout-confirm-btn:hover { opacity:.85 !important; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('#signout-cancel-btn').onclick  = () => overlay.remove();
+  overlay.querySelector('#signout-confirm-btn').onclick = async () => {
+    overlay.remove();
+    if (_firestoreUnsubscribe) { _firestoreUnsubscribe(); _firestoreUnsubscribe = null; }
+    await fbAuth.signOut();
+    currentUser = null;
+    showNotif('Signed out', 'info');
+    await loadData();
+    renderAll();
+  };
+  // Close on backdrop click
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
+function friendlyAuthError(code) {
+  const map = {
+    'auth/invalid-email':          'Invalid email address.',
+    'auth/user-not-found':         'No account found with this email.',
+    'auth/wrong-password':         'Incorrect password.',
+    'auth/invalid-credential':     'Incorrect email or password.',
+    'auth/email-already-in-use':   'This email is already registered.',
+    'auth/weak-password':          'Password must be at least 6 characters.',
+    'auth/too-many-requests':      'Too many attempts. Please try again later.',
+    'auth/popup-closed-by-user':   'Sign-in popup was closed.',
+    'auth/network-request-failed': 'Network error. Check your connection.',
+  };
+  return map[code] || 'Sign-in failed. Please try again.';
+}
+
+// ── Auth UI ───────────────────────────────────────────────────────────────────
+let authMode = 'signin';
+
+function showAuthModal() {
+  document.getElementById('auth-modal-overlay').style.display = 'flex';
+  document.getElementById('auth-email').value = '';
+  document.getElementById('auth-password').value = '';
+  document.getElementById('auth-displayname').value = '';
+  clearAuthError();
+  setAuthModeUI('signin');
+  setTimeout(() => document.getElementById('auth-email').focus(), 60);
+}
+
+function hideAuthModal() {
+  document.getElementById('auth-modal-overlay').style.display = 'none';
+}
+
+function setAuthModeUI(mode) {
+  authMode = mode;
+  const reg = mode === 'register';
+  document.getElementById('auth-modal-title').textContent    = reg ? 'Create account' : 'Welcome back';
+  document.getElementById('auth-modal-subtitle').textContent = reg ? 'Join WorkTracker today' : 'Sign in to sync your data';
+  document.getElementById('auth-submit-label').textContent   = reg ? 'Create Account' : 'Sign In';
+  document.getElementById('auth-toggle-text').textContent    = reg ? 'Already have an account?' : "Don't have an account?";
+  document.getElementById('btn-auth-toggle').textContent     = reg ? 'Sign In' : 'Register';
+  document.getElementById('auth-name-field').style.display   = reg ? '' : 'none';
+  clearAuthError();
+}
+
+function showAuthError(msg) {
+  const el = document.getElementById('auth-error-box');
+  el.textContent = msg;
+  el.style.display = 'block';
+  document.getElementById('auth-email').classList.add('error');
+  document.getElementById('auth-password').classList.add('error');
+}
+
+function clearAuthError() {
+  document.getElementById('auth-error-box').style.display = 'none';
+  document.getElementById('auth-email').classList.remove('error');
+  document.getElementById('auth-password').classList.remove('error');
+}
+
+function setAuthLoading(on) {
+  const btn = document.getElementById('btn-auth-submit');
+  btn.disabled = on;
+  btn.classList.toggle('loading', on);
+}
+
+function updateAuthUI(user) {
+  const profile  = document.getElementById('auth-profile');
+  const signInBtn = document.getElementById('btn-signin-titlebar');
+  // Settings page panels
+  const settingsOut = document.getElementById('settings-account-signed-out');
+  const settingsIn  = document.getElementById('settings-account-signed-in');
+
+  if (user) {
+    profile.style.display = 'flex';
+    signInBtn.style.display = 'none';
+    const avatar = document.getElementById('auth-avatar');
+    avatar.src = user.photoURL || '';
+    avatar.style.display = user.photoURL ? '' : 'none';
+    document.getElementById('auth-username').textContent = user.displayName || user.email;
+    if (settingsIn) {
+      settingsIn.style.display = '';
+      settingsOut.style.display = 'none';
+      document.getElementById('settings-user-email').textContent = user.email;
+    }
+  } else {
+    profile.style.display = 'none';
+    signInBtn.style.display = '';
+    if (settingsOut) {
+      settingsOut.style.display = '';
+      settingsIn.style.display = 'none';
+    }
+  }
+}
+
+function initAuthUI() {
+  // Titlebar
+  document.getElementById('btn-signin-titlebar').addEventListener('click', showAuthModal);
+
+  // Settings page
+  document.getElementById('btn-settings-signin')?.addEventListener('click', showAuthModal);
+  document.getElementById('btn-settings-signout')?.addEventListener('click', doSignOut);
+
+  // Modal close
+  document.getElementById('auth-modal-close').addEventListener('click', hideAuthModal);
+  document.getElementById('btn-auth-skip').addEventListener('click', hideAuthModal);
+  document.getElementById('auth-modal-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'auth-modal-overlay') hideAuthModal();
+  });
+
+  // Google
+  document.getElementById('btn-google-signin').addEventListener('click', signInWithGoogle);
+
+  // Toggle mode
+  document.getElementById('btn-auth-toggle').addEventListener('click', () => {
+    setAuthModeUI(authMode === 'signin' ? 'register' : 'signin');
+  });
+
+  // Submit
+  document.getElementById('btn-auth-submit').addEventListener('click', async () => {
+    const email    = document.getElementById('auth-email').value.trim();
+    const password = document.getElementById('auth-password').value;
+    const name     = document.getElementById('auth-displayname').value.trim();
+    clearAuthError();
+    if (!email)    { showAuthError('Please enter your email.');    return; }
+    if (!password) { showAuthError('Please enter your password.'); return; }
+    if (authMode === 'register') await registerWithEmail(email, password, name);
+    else                         await signInWithEmail(email, password);
+  });
+
+  // Enter key
+  ['auth-email','auth-password','auth-displayname'].forEach(id => {
+    document.getElementById(id)?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('btn-auth-submit').click();
+    });
+  });
+
+  // Eye toggle
+  document.getElementById('auth-eye-toggle').addEventListener('click', () => {
+    const input = document.getElementById('auth-password');
+    const isPass = input.type === 'password';
+    input.type = isPass ? 'text' : 'password';
+    document.getElementById('eye-icon-show').style.display = isPass ? 'none' : '';
+    document.getElementById('eye-icon-hide').style.display = isPass ? '' : 'none';
+  });
+}
+
 // ── State ────────────────────────────────────────────────────────────────────
 let state = {
   tasks: [],
@@ -81,24 +439,35 @@ function getTaskStatus(task) {
 
 // ── Persistence ──────────────────────────────────────────────────────────────
 async function loadData() {
-  const data = await api.loadData();
-  state.tasks = data.tasks || [];
+  let data = null;
+  if (currentUser && fbDb) {
+    try {
+      const doc = await fbDb.collection('users').doc(currentUser.uid).get();
+      if (doc.exists) data = doc.data();
+    } catch (e) { console.warn('Firestore load failed, using local:', e); }
+  }
+  if (!data) data = await api.loadData();
+
+  state.tasks    = data.tasks    || [];
   state.sessions = data.sessions || [];
-  // Load planner data
-  plannerState.projects = data.projects || [];
-  plannerState.versions = data.versions || [];
+  plannerState.projects     = data.projects     || [];
+  plannerState.versions     = data.versions     || [];
   plannerState.plannerTasks = data.plannerTasks || [];
-  // Restore active task if needed (shouldn't normally survive restart)
 }
 
 async function saveData() {
-  await api.saveData({
+  const payload = {
     tasks: state.tasks,
     sessions: state.sessions,
     projects: plannerState.projects,
     versions: plannerState.versions,
     plannerTasks: plannerState.plannerTasks,
-  });
+  };
+  await api.saveData(payload);
+  if (currentUser && fbDb) {
+    try { await fbDb.collection('users').doc(currentUser.uid).set(payload); }
+    catch (e) { console.warn('Firestore save failed:', e); }
+  }
 }
 
 // ── Timer Logic ──────────────────────────────────────────────────────────────
@@ -633,12 +1002,6 @@ async function loadSettings() {
   const settings = await api.loadSettings();
   document.getElementById('toggle-startup').checked = settings.startWithWindows || false;
 
-  if (settings.firebaseConfig) {
-    document.getElementById('fb-api-key').value = settings.firebaseConfig.apiKey || '';
-    document.getElementById('fb-project-id').value = settings.firebaseConfig.projectId || '';
-    document.getElementById('fb-app-id').value = settings.firebaseConfig.appId || '';
-  }
-
   const info = await api.getPlatformInfo();
   document.getElementById('platform-info').textContent = `${info.platform} — ${info.username}`;
 
@@ -942,6 +1305,7 @@ async function renderCalendar() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
+  await initFirebase();   // sets up auth listener first
   await loadData();
   await loadSettings();
 
@@ -1068,17 +1432,8 @@ async function init() {
     showNotif(`Startup ${e.target.checked ? 'enabled' : 'disabled'}`, 'info');
   });
 
-
-  document.getElementById('btn-save-firebase').addEventListener('click', async () => {
-    const settings = await api.loadSettings();
-    settings.firebaseConfig = {
-      apiKey: document.getElementById('fb-api-key').value.trim(),
-      projectId: document.getElementById('fb-project-id').value.trim(),
-      appId: document.getElementById('fb-app-id').value.trim(),
-    };
-    await api.saveSettings(settings);
-    showNotif('Firebase config saved (restart to activate)', 'success');
-  });
+  // Init Auth UI
+  initAuthUI();
 
   // Close modal on overlay click
   document.getElementById('modal-overlay').addEventListener('click', (e) => {

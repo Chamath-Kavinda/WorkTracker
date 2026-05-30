@@ -19,7 +19,6 @@
 - `.exe` NSIS installer for Windows 10/11
 - Installs to Program Files with Start Menu shortcut
 - Desktop shortcut created automatically
-- Uninstaller included
 
 ## Features
 

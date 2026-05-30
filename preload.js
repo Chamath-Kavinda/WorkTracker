@@ -5,14 +5,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveData: (data) => ipcRenderer.invoke('save-data', data),
   loadSettings: () => ipcRenderer.invoke('load-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
-  
+
   windowMinimize: () => ipcRenderer.invoke('window-minimize'),
   windowMaximize: () => ipcRenderer.invoke('window-maximize'),
   windowClose: () => ipcRenderer.invoke('window-close'),
   windowQuit: () => ipcRenderer.invoke('window-quit'),
-  
+
   getPlatformInfo: () => ipcRenderer.invoke('get-platform-info'),
   exportReport: (data) => ipcRenderer.invoke('export-report', data),
   openExportsFolder: (folder) => ipcRenderer.invoke('open-exports-folder', folder),
   getAppStartTime: () => ipcRenderer.invoke('get-app-start-time'),
+
+  // Google OAuth via main-process BrowserWindow
+  googleSignIn: () => ipcRenderer.invoke('google-sign-in'),
 });

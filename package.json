@@ -1,6 +1,6 @@
 {
   "name": "worktracker",
-  "version": "1.0.0",
+  "version": "3.1.1",
   "description": "Work Time Tracker - Track your tasks with precision",
   "author": "WorkTracker",
   "main": "main.js",
@@ -33,7 +33,15 @@
       "createStartMenuShortcut": true,
       "shortcutName": "WorkTracker"
     },
-    "extraResources": []
+    "extraResources": [],
+    "protocols": [
+      {
+        "name": "WorkTracker",
+        "schemes": [
+          "worktracker"
+        ]
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^36.3.1",
