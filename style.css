@@ -727,7 +727,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
   border: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 180px);
+  max-height: calc(100vh - 220px);
 }
 .planner-version-col.locked {
   opacity: 0.7;
@@ -810,6 +810,8 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
   font-size: 13px; font-weight: 600;
   margin-bottom: 4px;
   padding-right: 48px;
+  word-break: break-word;
+  white-space: normal;
 }
 .planner-task-notes {
   font-size: 11px; color: var(--text-secondary);
@@ -863,7 +865,25 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 .btn-add-version-task:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
 .btn-add-version-task:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
 
-/* Add Version Column */
+.planner-version-col.all-done {
+  border-color: #10b98140;
+  background: #10b98108;
+}
+.planner-version-col.all-done .version-col-header::before {
+  background: #10b981;
+}
+.planner-version-col.all-done .version-col-header {
+  border-bottom-color: #10b98130;
+}
+.planner-version-col.all-done .version-col-footer {
+  border-top-color: #10b98130;
+}
+.all-done-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 700;
+  padding: 2px 8px; border-radius: 20px;
+  background: #10b98120; border: 1px solid #10b98140; color: #10b981;
+}
 .planner-add-version-col {
   flex-shrink: 0; width: 220px;
   background: transparent;
@@ -936,6 +956,11 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
   flex: 1;
   padding-bottom: 16px;
 }
+
+#planner-board-view::-webkit-scrollbar { height: 14px; }
+#planner-board-view::-webkit-scrollbar-track { background: #ffffff08; border-radius: 4px; }
+#planner-board-view::-webkit-scrollbar-thumb { background: #ffffff30; border-radius: 4px; }
+#planner-board-view::-webkit-scrollbar-thumb:hover { background: #ffffff50; }
 
 /* Planner Export Menu */
 .proj-export-menu {

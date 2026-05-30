@@ -1285,10 +1285,12 @@ function renderBoard() {
       const verColor = proj?.color || PLANNER_COLORS[0];
 
       const col = document.createElement('div');
-      col.className = `planner-version-col${locked ? ' locked' : ''}`;
+      const allDone = tasks.length > 0 && tasks.every(t => t.done);
+      col.className = `planner-version-col${locked ? ' locked' : ''}${allDone ? ' all-done' : ''}`;
       col.style.setProperty('--ver-color', verColor);
 
       const lockIcon = locked ? `<span class="version-locked-badge">🔒 Locked</span>` : '';
+      const allDoneBadge = allDone ? `<span class="all-done-badge">✅ All Done</span>` : '';
 
       col.innerHTML = `
         <div class="version-col-header">
@@ -1307,6 +1309,7 @@ function renderBoard() {
           <div class="version-col-meta">
             ${getDueBadge(ver)}
             ${lockIcon}
+            ${allDoneBadge}
           </div>
           ${ver.desc ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.4">${ver.desc}</div>` : ''}
         </div>
@@ -1348,7 +1351,7 @@ function renderBoard() {
           tick?.addEventListener('change', () => {
             task.done = tick.checked;
             savePlannerData();
-            item.classList.toggle('done', task.done);
+            renderBoard();
           });
           if (!locked) {
             item.querySelector('[data-action="edit-task"]')?.addEventListener('click', () => openPlannerTaskModal(ver.id, task.id));
@@ -1579,7 +1582,6 @@ async function exportProjectReport(projId, format) {
       tasks.forEach((t, i) => {
         txt += `  ${i + 1}. [${t.done ? 'x' : ' '}] ${t.name}`;
         txt += ` (${t.priority || 'medium'} priority)\n`;
-        if (t.notes) txt += `     Notes: ${t.notes}\n`;
       });
       txt += '\n';
     });
@@ -1592,106 +1594,153 @@ async function exportProjectReport(projId, format) {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
-    const margin = 20;
+    const margin = 18;
     let y = margin;
     const checkPage = (needed = 10) => { if (y + needed > pageH - margin) { doc.addPage(); y = margin; } };
     const projColor = proj.color || '#7c6af7';
     const rgb = hexToRgb(projColor);
+    const green = { r: 16, g: 185, b: 129 };
+
+    // Draw a checkmark using lines (avoids unicode rendering issues in jsPDF)
+    const drawCheck = (cx, cy, color) => {
+      doc.setDrawColor(color.r, color.g, color.b);
+      doc.setLineWidth(0.55);
+      doc.line(cx - 0.9, cy + 0.1, cx - 0.1, cy + 1.0);
+      doc.line(cx - 0.1, cy + 1.0, cx + 1.3, cy - 0.8);
+      doc.setLineWidth(0.2);
+    };
 
     // Header bar
     doc.setFillColor(rgb.r, rgb.g, rgb.b);
-    doc.rect(0, 0, pageW, 30, 'F');
+    doc.rect(0, 0, pageW, 28, 'F');
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(18); doc.setFont('helvetica', 'bold');
-    doc.text(proj.name, margin, 16);
-    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-    doc.text('Project Report', margin, 24);
-    doc.text(new Date().toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }), pageW - margin, 24, { align: 'right' });
-    y = 40;
+    doc.setFontSize(17); doc.setFont('helvetica', 'bold');
+    doc.text(proj.name, margin, 14);
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+    doc.text('Project Report', margin, 22);
+    doc.text(new Date().toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }), pageW - margin, 22, { align: 'right' });
+    y = 36;
 
     // Description
     if (proj.desc) {
-      doc.setTextColor(80, 80, 80); doc.setFontSize(10); doc.setFont('helvetica', 'italic');
-      doc.text(proj.desc, margin, y); y += 10;
+      doc.setTextColor(100, 100, 100); doc.setFontSize(9); doc.setFont('helvetica', 'italic');
+      doc.text(proj.desc, margin, y); y += 9;
     }
 
     // Summary box
     const totalTasks = plannerState.plannerTasks.filter(t => versions.some(v => v.id === t.versionId)).length;
     const doneTasks = plannerState.plannerTasks.filter(t => versions.some(v => v.id === t.versionId) && t.done).length;
-    doc.setFillColor(245, 245, 255);
-    doc.roundedRect(margin, y, pageW - margin * 2, 14, 3, 3, 'F');
-    doc.setTextColor(60, 60, 60); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
-    doc.text(`Versions: ${versions.length}`, margin + 6, y + 9);
-    doc.text(`Total Tasks: ${totalTasks}`, pageW / 2 - 20, y + 9);
-    doc.text(`Completed: ${doneTasks} / ${totalTasks}`, pageW - margin - 6, y + 9, { align: 'right' });
-    y += 22;
+    const allProjDone = totalTasks > 0 && doneTasks === totalTasks;
+    doc.setFillColor(...(allProjDone ? [220, 248, 236] : [240, 240, 255]));
+    doc.roundedRect(margin, y, pageW - margin * 2, 8, 2, 2, 'F');
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...(allProjDone ? [green.r, green.g, green.b] : [60, 60, 60]));
+    doc.text('Versions: ' + versions.length, margin + 5, y + 5, { align: 'left' });
+    doc.text('Total Tasks: ' + totalTasks, pageW / 2, y + 5, { align: 'center' });
+    const completedLabel = allProjDone ? 'All Finished (' + doneTasks + '/' + totalTasks + ')' : 'Completed: ' + doneTasks + ' / ' + totalTasks;
+    doc.text(completedLabel, pageW - margin - 5, y + 5, { align: 'right' });
+    if (allProjDone) {
+      const tw = doc.getTextWidth(completedLabel);
+      drawCheck(pageW - margin - 5 - tw - 3, y + 7, green);
+    }
+    y += 18;
 
     // Versions
     versions.forEach(ver => {
       const tasks = plannerState.plannerTasks.filter(t => t.versionId === ver.id);
       const done = tasks.filter(t => t.done).length;
-      checkPage(20);
+      const allDone = tasks.length > 0 && done === tasks.length;
+      const verRgb = allDone ? green : rgb;
+      const rowH = 5.5;
 
-      // Version header
-      doc.setFillColor(rgb.r, rgb.g, rgb.b);
-      doc.roundedRect(margin, y, pageW - margin * 2, 10, 2, 2, 'F');
-      doc.setTextColor(255, 255, 255); doc.setFontSize(10); doc.setFont('helvetica', 'bold');
-      doc.text(ver.name, margin + 4, y + 7);
+      checkPage(22);
+
+      // Measure right badge text first so version name can be truncated to avoid overlap
+      doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
       const dueTxt = ver.pending ? 'Pending' : (ver.dueDate || 'N/A');
-      doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-      doc.text(`Due: ${dueTxt}   Tasks: ${done}/${tasks.length} done`, pageW - margin - 4, y + 7, { align: 'right' });
-      y += 13;
+      const rightLabel = allDone ? 'FINISHED' : ('Due: ' + dueTxt + '   ' + done + '/' + tasks.length + ' done');
+      const rightLabelW = doc.getTextWidth(rightLabel);
+      const rightX = pageW - margin - 3.5;
 
-      if (ver.desc) {
-        doc.setTextColor(100, 100, 100); doc.setFontSize(8); doc.setFont('helvetica', 'italic');
-        doc.text(ver.desc, margin + 2, y); y += 7;
+      // Version header bar
+      doc.setFillColor(verRgb.r, verRgb.g, verRgb.b);
+      doc.roundedRect(margin, y, pageW - margin * 2, 8, 2, 2, 'F');
+      doc.setTextColor(255, 255, 255);
+
+      // Draw checkmark before FINISHED
+      if (allDone) {
+        drawCheck(rightX - rightLabelW - 4, y + 6.2, { r: 255, g: 255, b: 255 });
       }
+      doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
+      doc.text(rightLabel, rightX, y + 5, { align: 'right' });
+
+      // Version name truncated to not overlap right badge
+      const maxNameW = pageW - margin * 2 - rightLabelW - (allDone ? 12 : 8);
+      doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+      const verNameStr = doc.splitTextToSize(ver.name, maxNameW)[0];
+      doc.text(verNameStr, margin + 4, y + 5);
+
+      y += 14;
 
       // Tasks
       if (tasks.length === 0) {
-        doc.setTextColor(160, 160, 160); doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-        doc.text('No tasks', margin + 4, y); y += 8;
+        doc.setTextColor(180, 180, 180); doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
+        doc.text('No tasks', margin + 4, y + 3.5); y += 7;
       } else {
         tasks.forEach((task, i) => {
-          checkPage(10);
-          if (i % 2 === 0) { doc.setFillColor(250, 250, 255); doc.rect(margin, y, pageW - margin * 2, 9, 'F'); }
-          // Checkbox
-          doc.setDrawColor(180, 180, 180);
-          doc.roundedRect(margin + 3, y + 2, 5, 5, 1, 1, 'S');
+          checkPage(rowH + 2);
+          // Alternating row bg
+          if (i % 2 === 0) {
+            doc.setFillColor(...(allDone ? [238, 251, 245] : [248, 248, 255]));
+            doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
+          }
+          // Checkbox — 3.5x3.5, vertically centered in rowH
+          const cbSize = 3.5;
+          const cbX = margin + 3;
+          const cbY = y + (rowH - cbSize) / 2;
+          const cbCx = cbX + cbSize / 2;
+          const cbCy = cbY + cbSize / 2;
           if (task.done) {
-            doc.setDrawColor(rgb.r, rgb.g, rgb.b);
-            doc.setFillColor(rgb.r, rgb.g, rgb.b);
-            doc.roundedRect(margin + 3, y + 2, 5, 5, 1, 1, 'FD');
-            doc.setTextColor(255, 255, 255); doc.setFontSize(6);
-            doc.text('✓', margin + 4.5, y + 6);
+            doc.setFillColor(verRgb.r, verRgb.g, verRgb.b);
+            doc.setDrawColor(verRgb.r, verRgb.g, verRgb.b);
+            doc.setLineWidth(0.2);
+            doc.roundedRect(cbX, cbY, cbSize, cbSize, 0.6, 0.6, 'FD');
+            // Tick: short left leg down, long right leg up — centered on cbCx, cbCy
+            doc.setDrawColor(255, 255, 255);
+            doc.setLineWidth(0.5);
+            doc.line(cbCx - 0.7, cbCy, cbCx - 0.1, cbCy + 0.7);
+            doc.line(cbCx - 0.1, cbCy + 0.7, cbCx + 0.9, cbCy - 0.6);
+            doc.setLineWidth(0.2);
+          } else {
+            doc.setDrawColor(190, 190, 190);
+            doc.setLineWidth(0.3);
+            doc.roundedRect(cbX, cbY, cbSize, cbSize, 0.6, 0.6, 'S');
+            doc.setLineWidth(0.2);
           }
-          // Task name
-          const nameColor = task.done ? [160, 160, 160] : [30, 30, 30];
-          doc.setTextColor(...nameColor); doc.setFontSize(9);
-          doc.setFont('helvetica', task.done ? 'normal' : 'bold');
-          doc.text(task.name, margin + 11, y + 6.5);
-          // Priority badge
-          const pColors = { high: [239, 68, 68], medium: [234, 179, 8], low: [34, 197, 94] };
-          const pc = pColors[task.priority || 'medium'];
-          doc.setTextColor(...pc); doc.setFontSize(7); doc.setFont('helvetica', 'normal');
-          doc.text((task.priority || 'medium').toUpperCase(), pageW - margin - 4, y + 6.5, { align: 'right' });
-          y += 9;
-          if (task.notes) {
-            checkPage(7);
-            doc.setTextColor(120, 120, 120); doc.setFontSize(7.5); doc.setFont('helvetica', 'italic');
-            doc.text(`   ${task.notes}`, margin + 11, y); y += 7;
-          }
+          // Task name — vertically centered
+          const textY = y + rowH / 2 + 1.0;
+          doc.setTextColor(...(task.done ? [150, 150, 150] : [25, 25, 25]));
+          doc.setFontSize(7.5); doc.setFont('helvetica', task.done ? 'normal' : 'bold');
+          const maxNW = pageW - margin * 2 - 30;
+          const tName = doc.splitTextToSize(task.name, maxNW)[0];
+          doc.text(tName, margin + 9, textY);
+          // Priority — vertically centered
+          const pColors = { high: [220, 50, 50], medium: [190, 130, 10], low: [16, 160, 100] };
+          doc.setTextColor(...pColors[task.priority || 'medium']);
+          doc.setFontSize(5.5); doc.setFont('helvetica', 'bold');
+          doc.text((task.priority || 'medium').toUpperCase(), pageW - margin - 3, textY, { align: 'right' });
+          y += rowH;
         });
       }
-      y += 6;
+      y += 5;
     });
 
     // Footer
     checkPage(12);
-    doc.setDrawColor(200, 200, 200); doc.line(margin, y, pageW - margin, y); y += 7;
-    doc.setFontSize(8); doc.setTextColor(150, 150, 150); doc.setFont('helvetica', 'normal');
+    doc.setDrawColor(220, 220, 220); doc.line(margin, y, pageW - margin, y); y += 6;
+    doc.setFontSize(7.5); doc.setTextColor(170, 170, 170); doc.setFont('helvetica', 'normal');
     doc.text('Generated by WorkTracker', margin, y);
-    doc.text(`${new Date().toLocaleString()}`, pageW - margin, y, { align: 'right' });
+    doc.text(new Date().toLocaleString(), pageW - margin, y, { align: 'right' });
 
     const base64 = btoa(String.fromCharCode(...new Uint8Array(doc.output('arraybuffer'))));
     const filepath = await api.exportReport({ content: base64, filename: `${safeName}-${dateStr}.pdf`, isPdf: true, folder: 'ProjectPlans' });
