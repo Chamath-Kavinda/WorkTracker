@@ -12,6 +12,7 @@ let state = {
   currentPage: 'dashboard',
   timerInterval: null,
 };
+let selectedCountry = 'LK';
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 function genId() {
@@ -572,7 +573,7 @@ function switchPage(page) {
   document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
 
   if (page === 'report') renderReport();
-  if (page === 'calendar') renderCalendar();
+  if (page === 'calendar') renderCalendar().catch(console.error);
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -588,6 +589,20 @@ async function loadSettings() {
 
   const info = await api.getPlatformInfo();
   document.getElementById('platform-info').textContent = `${info.platform} — ${info.username}`;
+
+  if (settings.country) {
+    selectedCountry = settings.country;
+    document.getElementById('select-country').value = settings.country;
+  }
+
+  document.getElementById('select-country').addEventListener('change', async (e) => {
+    selectedCountry = e.target.value;
+    const settings = await api.loadSettings();
+    settings.country = e.target.value;
+    await api.saveSettings(settings);
+    showNotif(`Holidays updated for ${e.target.options[e.target.selectedIndex].text}`, 'info');
+    if (state.currentPage === 'calendar') renderCalendar().catch(console.error);
+  });
 }
 
 // ── Date/Greeting ─────────────────────────────────────────────────────────────
@@ -731,11 +746,43 @@ async function exportReport(format) {
   }
 }
 
+// ── Holidays API ──────────────────────────────────────────────────────────────
+let holidayCache = {}; // { 'LK-2026': { '05-01': 'Labour Day', ... } }
+
+async function fetchHolidays(countryCode, year) {
+  const cacheKey = `${countryCode}-${year}`;
+  if (holidayCache[cacheKey]) return holidayCache[cacheKey];
+
+  if (countryCode !== 'LK') return {};
+
+  try {
+    const url = `https://raw.githubusercontent.com/Dilshan-H/srilanka-holidays/main/json/${year}.json`;
+    console.log('Fetching holidays from:', url);
+    const res = await fetch(url);
+    console.log('Response status:', res.status);
+    if (!res.ok) return {};
+    const data = await res.json();
+    console.log('Holiday data sample:', data[0]);
+    const map = {};
+    data.forEach(h => {
+      const monthDay = h.start.slice(5); // MM-DD
+      map[monthDay] = h.summary;
+    });
+    console.log('Holiday map:', map);
+    holidayCache[cacheKey] = map;
+    return map;
+  } catch (e) {
+    console.error('fetchHolidays error:', e);
+    return {};
+  }
+}
+
 // ── Calendar ──────────────────────────────────────────────────────────────────
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth();
 
-function renderCalendar() {
+
+async function renderCalendar() {
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -744,6 +791,9 @@ function renderCalendar() {
   const firstDay = new Date(calYear, calMonth, 1).getDay();
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
   const todayStr2 = todayStr();
+
+  // Fetch holidays for this month's year
+  const holidays = await fetchHolidays(selectedCountry, calYear);
 
   // Build session map by date
   const dateMap = {};
@@ -769,6 +819,7 @@ function renderCalendar() {
     const isToday = dateKey === todayStr2;
     const data = dateMap[dateKey];
     const hasWork = !!data;
+    const holiday = holidays[dateKey.slice(5)]; // MM-DD lookup
 
     let taskPills = '';
     if (data) {
@@ -777,9 +828,13 @@ function renderCalendar() {
       if (data.tasks.size > 2) taskPills += `<div class="cal-task-pill">+${data.tasks.size - 2} more</div>`;
     }
 
+    const dayOfWeek = new Date(dateKey).getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     html += `
-      <div class="cal-day ${isToday ? 'today' : ''} ${hasWork ? 'has-work' : ''}" onclick="switchPage('report'); document.getElementById('report-date').value='${dateKey}'; renderReport('${dateKey}')">
+      <div class="cal-day ${isToday ? 'today' : ''} ${hasWork ? 'has-work' : ''} ${holiday ? 'is-holiday' : ''} ${isWeekend ? 'weekend' : ''}"
+           onclick="switchPage('report'); document.getElementById('report-date').value='${dateKey}'; renderReport('${dateKey}')">
         <div class="cal-day-num">${d}</div>
+        ${holiday ? `<div class="cal-holiday-label">🎉 ${holiday}</div>` : ''}
         ${data ? `<div class="cal-day-total">${formatDurationShort(data.totalMs)}</div>` : ''}
         <div class="cal-day-tasks">${taskPills}</div>
       </div>`;
@@ -789,6 +844,7 @@ function renderCalendar() {
   html += `
     <div class="cal-legend">
       <span><span class="cal-legend-dot" style="background:#7c6af7"></span> Has work sessions</span>
+      <span><span class="cal-legend-dot" style="background:#f59e0b"></span> Public holiday</span>
       <span><span class="cal-legend-dot" style="background:#ffffff30;border:1px solid #7c6af7"></span> Today</span>
       <span style="color:var(--text-secondary);font-size:11px">Click any day to view its report</span>
     </div>`;
@@ -869,12 +925,12 @@ async function init() {
   document.getElementById('cal-prev').addEventListener('click', () => {
     calMonth--;
     if (calMonth < 0) { calMonth = 11; calYear--; }
-    renderCalendar();
+    renderCalendar().catch(console.error);
   });
   document.getElementById('cal-next').addEventListener('click', () => {
     calMonth++;
     if (calMonth > 11) { calMonth = 0; calYear++; }
-    renderCalendar();
+    renderCalendar().catch(console.error);
   });
 
   // Report date picker

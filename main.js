@@ -66,11 +66,13 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+    webSecurity: false,
     icon: path.join(__dirname, 'assets', 'icon.png'),
     show: false,
   });
 
   mainWindow.loadFile('index.html');
+  //mainWindow.webContents.openDevTools();
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
