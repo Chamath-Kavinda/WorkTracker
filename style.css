@@ -594,7 +594,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 
 .hidden { display: none; }
 /* ── Planner ── */
-#page-planner { padding: 28px 32px 0 32px; overflow: hidden; display: flex; flex-direction: column; height: 100%; }
+#page-planner { padding: 28px 32px 0 32px; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; height: 100%; }
 
 /* Projects Grid */
 .planner-projects-grid {
