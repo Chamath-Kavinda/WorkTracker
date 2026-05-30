@@ -639,7 +639,7 @@ async function exportReport(format) {
   const dateStr = date || new Date().toISOString().split('T')[0];
 
   if (format === 'txt') {
-    const filepath = await api.exportReport({ content, filename: `worktracker-report-${dateStr}.txt` });
+    const filepath = await api.exportReport({ content, filename: `worktracker-report-${dateStr}.txt`, folder: 'Reports' });
     showNotif(`Report saved: ${filepath}`, 'success');
   } else if (format === 'pdf') {
     const { jsPDF } = window.jspdf;
@@ -751,7 +751,7 @@ async function exportReport(format) {
 
     const pdfContent = doc.output('arraybuffer');
     const base64 = btoa(String.fromCharCode(...new Uint8Array(pdfContent)));
-    const filepath = await api.exportReport({ content: base64, filename: `worktracker-report-${dateStr}.pdf`, isPdf: true });
+    const filepath = await api.exportReport({ content: base64, filename: `worktracker-report-${dateStr}.pdf`, isPdf: true, folder: 'Reports' });
     showNotif(`PDF saved: ${filepath}`, 'success');
   }
 }
@@ -1180,6 +1180,7 @@ function renderPlannerProjects() {
           <div class="proj-card-icon" style="--proj-color:${proj.color}">📋</div>
           <div class="proj-card-actions">
             <button class="proj-action-btn" title="Edit" data-action="edit"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8 2l2 2-6 6H2V8l6-6z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></button>
+            <button class="proj-action-btn export" title="Export" data-action="export"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v7M3.5 5.5L6 8l2.5-2.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 9.5v1h8v-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
             <button class="proj-action-btn danger" title="Delete" data-action="delete"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M4.5 3V2h3v1M4.5 5.5v3.5M7.5 5.5v3.5M3 3l.5 7.5h5L9 3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg></button>
           </div>
         </div>
@@ -1202,6 +1203,10 @@ function renderPlannerProjects() {
       div.querySelector('[data-action="edit"]').addEventListener('click', (e) => {
         e.stopPropagation();
         openProjectModal(proj.id);
+      });
+      div.querySelector('[data-action="export"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        showProjExportMenu(proj.id, e.currentTarget);
       });
       div.querySelector('[data-action="delete"]').addEventListener('click', (e) => {
         e.stopPropagation();
@@ -1516,6 +1521,173 @@ function savePlannerTask() {
   savePlannerData();
   closePlannerTaskModal();
   renderBoard();
+}
+
+// ── Planner Export ────────────────────────────────────────────────────────────
+function showProjExportMenu(projId, anchor) {
+  document.querySelectorAll('.proj-export-menu').forEach(m => m.remove());
+  const menu = document.createElement('div');
+  menu.className = 'proj-export-menu';
+  menu.innerHTML = `
+    <button data-fmt="txt">📄 Export as TXT</button>
+    <button data-fmt="pdf">📕 Export as PDF</button>`;
+  const rect = anchor.getBoundingClientRect();
+  menu.style.cssText = `position:fixed;top:${rect.bottom + 6}px;left:${rect.left}px;z-index:9999`;
+  document.body.appendChild(menu);
+  menu.querySelector('[data-fmt="txt"]').addEventListener('click', () => { exportProjectReport(projId, 'txt'); menu.remove(); });
+  menu.querySelector('[data-fmt="pdf"]').addEventListener('click', () => { exportProjectReport(projId, 'pdf'); menu.remove(); });
+  setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 10);
+}
+
+async function exportProjectReport(projId, format) {
+  const proj = plannerState.projects.find(p => p.id === projId);
+  if (!proj) return;
+  const versions = plannerState.versions.filter(v => v.projectId === projId);
+  const dateStr = todayStr();
+  const safeName = proj.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+  if (format === 'txt') {
+    let txt = `PROJECT REPORT: ${proj.name}\n`;
+    txt += `${'='.repeat(50)}\n`;
+    if (proj.desc) txt += `Description: ${proj.desc}\n`;
+    txt += `Generated: ${new Date().toLocaleString()}\n`;
+    txt += `Versions: ${versions.length}\n\n`;
+    versions.forEach(ver => {
+      const tasks = plannerState.plannerTasks.filter(t => t.versionId === ver.id);
+      const done = tasks.filter(t => t.done).length;
+      txt += `VERSION: ${ver.name}\n${'-'.repeat(40)}\n`;
+      if (ver.desc) txt += `  Description: ${ver.desc}\n`;
+      txt += `  Due: ${ver.pending ? 'Pending' : (ver.dueDate || 'N/A')}\n`;
+      txt += `  Status: ${ver.pending ? 'Pending' : (isVersionLocked(ver) ? 'Locked (Past Due)' : 'Active')}\n`;
+      txt += `  Tasks: ${tasks.length} total, ${done} done, ${tasks.length - done} remaining\n\n`;
+      tasks.forEach((t, i) => {
+        txt += `  ${i + 1}. [${t.done ? 'x' : ' '}] ${t.name}`;
+        txt += ` (${t.priority || 'medium'} priority)\n`;
+        if (t.notes) txt += `     Notes: ${t.notes}\n`;
+      });
+      txt += '\n';
+    });
+    txt += `\nGenerated by WorkTracker`;
+    const filepath = await api.exportReport({ content: txt, filename: `${safeName}-${dateStr}.txt`, folder: 'ProjectPlans' });
+    showNotif(`Saved: ${filepath}`, 'success');
+
+  } else if (format === 'pdf') {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 20;
+    let y = margin;
+    const checkPage = (needed = 10) => { if (y + needed > pageH - margin) { doc.addPage(); y = margin; } };
+    const projColor = proj.color || '#7c6af7';
+    const rgb = hexToRgb(projColor);
+
+    // Header bar
+    doc.setFillColor(rgb.r, rgb.g, rgb.b);
+    doc.rect(0, 0, pageW, 30, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18); doc.setFont('helvetica', 'bold');
+    doc.text(proj.name, margin, 16);
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    doc.text('Project Report', margin, 24);
+    doc.text(new Date().toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }), pageW - margin, 24, { align: 'right' });
+    y = 40;
+
+    // Description
+    if (proj.desc) {
+      doc.setTextColor(80, 80, 80); doc.setFontSize(10); doc.setFont('helvetica', 'italic');
+      doc.text(proj.desc, margin, y); y += 10;
+    }
+
+    // Summary box
+    const totalTasks = plannerState.plannerTasks.filter(t => versions.some(v => v.id === t.versionId)).length;
+    const doneTasks = plannerState.plannerTasks.filter(t => versions.some(v => v.id === t.versionId) && t.done).length;
+    doc.setFillColor(245, 245, 255);
+    doc.roundedRect(margin, y, pageW - margin * 2, 14, 3, 3, 'F');
+    doc.setTextColor(60, 60, 60); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+    doc.text(`Versions: ${versions.length}`, margin + 6, y + 9);
+    doc.text(`Total Tasks: ${totalTasks}`, pageW / 2 - 20, y + 9);
+    doc.text(`Completed: ${doneTasks} / ${totalTasks}`, pageW - margin - 6, y + 9, { align: 'right' });
+    y += 22;
+
+    // Versions
+    versions.forEach(ver => {
+      const tasks = plannerState.plannerTasks.filter(t => t.versionId === ver.id);
+      const done = tasks.filter(t => t.done).length;
+      checkPage(20);
+
+      // Version header
+      doc.setFillColor(rgb.r, rgb.g, rgb.b);
+      doc.roundedRect(margin, y, pageW - margin * 2, 10, 2, 2, 'F');
+      doc.setTextColor(255, 255, 255); doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+      doc.text(ver.name, margin + 4, y + 7);
+      const dueTxt = ver.pending ? 'Pending' : (ver.dueDate || 'N/A');
+      doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+      doc.text(`Due: ${dueTxt}   Tasks: ${done}/${tasks.length} done`, pageW - margin - 4, y + 7, { align: 'right' });
+      y += 13;
+
+      if (ver.desc) {
+        doc.setTextColor(100, 100, 100); doc.setFontSize(8); doc.setFont('helvetica', 'italic');
+        doc.text(ver.desc, margin + 2, y); y += 7;
+      }
+
+      // Tasks
+      if (tasks.length === 0) {
+        doc.setTextColor(160, 160, 160); doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+        doc.text('No tasks', margin + 4, y); y += 8;
+      } else {
+        tasks.forEach((task, i) => {
+          checkPage(10);
+          if (i % 2 === 0) { doc.setFillColor(250, 250, 255); doc.rect(margin, y, pageW - margin * 2, 9, 'F'); }
+          // Checkbox
+          doc.setDrawColor(180, 180, 180);
+          doc.roundedRect(margin + 3, y + 2, 5, 5, 1, 1, 'S');
+          if (task.done) {
+            doc.setDrawColor(rgb.r, rgb.g, rgb.b);
+            doc.setFillColor(rgb.r, rgb.g, rgb.b);
+            doc.roundedRect(margin + 3, y + 2, 5, 5, 1, 1, 'FD');
+            doc.setTextColor(255, 255, 255); doc.setFontSize(6);
+            doc.text('✓', margin + 4.5, y + 6);
+          }
+          // Task name
+          const nameColor = task.done ? [160, 160, 160] : [30, 30, 30];
+          doc.setTextColor(...nameColor); doc.setFontSize(9);
+          doc.setFont('helvetica', task.done ? 'normal' : 'bold');
+          doc.text(task.name, margin + 11, y + 6.5);
+          // Priority badge
+          const pColors = { high: [239, 68, 68], medium: [234, 179, 8], low: [34, 197, 94] };
+          const pc = pColors[task.priority || 'medium'];
+          doc.setTextColor(...pc); doc.setFontSize(7); doc.setFont('helvetica', 'normal');
+          doc.text((task.priority || 'medium').toUpperCase(), pageW - margin - 4, y + 6.5, { align: 'right' });
+          y += 9;
+          if (task.notes) {
+            checkPage(7);
+            doc.setTextColor(120, 120, 120); doc.setFontSize(7.5); doc.setFont('helvetica', 'italic');
+            doc.text(`   ${task.notes}`, margin + 11, y); y += 7;
+          }
+        });
+      }
+      y += 6;
+    });
+
+    // Footer
+    checkPage(12);
+    doc.setDrawColor(200, 200, 200); doc.line(margin, y, pageW - margin, y); y += 7;
+    doc.setFontSize(8); doc.setTextColor(150, 150, 150); doc.setFont('helvetica', 'normal');
+    doc.text('Generated by WorkTracker', margin, y);
+    doc.text(`${new Date().toLocaleString()}`, pageW - margin, y, { align: 'right' });
+
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(doc.output('arraybuffer'))));
+    const filepath = await api.exportReport({ content: base64, filename: `${safeName}-${dateStr}.pdf`, isPdf: true, folder: 'ProjectPlans' });
+    showNotif(`PDF saved: ${filepath}`, 'success');
+  }
+}
+
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return { r, g, b };
 }
 
 // ── Planner Init ──────────────────────────────────────────────────────────────

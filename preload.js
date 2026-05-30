@@ -13,6 +13,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   getPlatformInfo: () => ipcRenderer.invoke('get-platform-info'),
   exportReport: (data) => ipcRenderer.invoke('export-report', data),
-  openExportsFolder: () => ipcRenderer.invoke('open-exports-folder'),
+  openExportsFolder: (folder) => ipcRenderer.invoke('open-exports-folder', folder),
   getAppStartTime: () => ipcRenderer.invoke('get-app-start-time'),
 });

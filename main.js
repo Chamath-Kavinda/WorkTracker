@@ -140,8 +140,9 @@ ipcMain.handle('get-platform-info', () => ({
   username: os.userInfo().username,
 }));
 
-ipcMain.handle('export-report', (_, { content, filename, isPdf }) => {
-  const docsPath = path.join(app.getPath('userData'), 'exports');
+ipcMain.handle('export-report', (_, { content, filename, isPdf, folder }) => {
+  const subFolder = folder || 'Reports';
+  const docsPath = path.join(app.getPath('userData'), 'exports', subFolder);
   if (!fs.existsSync(docsPath)) fs.mkdirSync(docsPath, { recursive: true });
   const filepath = path.join(docsPath, filename);
   if (isPdf) {
@@ -152,8 +153,9 @@ ipcMain.handle('export-report', (_, { content, filename, isPdf }) => {
   return filepath;
 });
 
-ipcMain.handle('open-exports-folder', () => {
-  const exportsPath = path.join(app.getPath('userData'), 'exports');
+ipcMain.handle('open-exports-folder', (_, folder) => {
+  const subFolder = folder || 'Reports';
+  const exportsPath = path.join(app.getPath('userData'), 'exports', subFolder);
   if (!fs.existsSync(exportsPath)) fs.mkdirSync(exportsPath, { recursive: true });
   shell.openPath(exportsPath);
 });
