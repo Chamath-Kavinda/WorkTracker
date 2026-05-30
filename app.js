@@ -757,18 +757,14 @@ async function fetchHolidays(countryCode, year) {
 
   try {
     const url = `https://raw.githubusercontent.com/Dilshan-H/srilanka-holidays/main/json/${year}.json`;
-    console.log('Fetching holidays from:', url);
     const res = await fetch(url);
-    console.log('Response status:', res.status);
     if (!res.ok) return {};
     const data = await res.json();
-    console.log('Holiday data sample:', data[0]);
     const map = {};
     data.forEach(h => {
       const monthDay = h.start.slice(5); // MM-DD
       map[monthDay] = h.summary;
     });
-    console.log('Holiday map:', map);
     holidayCache[cacheKey] = map;
     return map;
   } catch (e) {
@@ -834,7 +830,7 @@ async function renderCalendar() {
       <div class="cal-day ${isToday ? 'today' : ''} ${hasWork ? 'has-work' : ''} ${holiday ? 'is-holiday' : ''} ${isWeekend ? 'weekend' : ''}"
            onclick="switchPage('report'); document.getElementById('report-date').value='${dateKey}'; renderReport('${dateKey}')">
         <div class="cal-day-num">${d}</div>
-        ${holiday ? `<div class="cal-holiday-label">🎉 ${holiday}</div>` : ''}
+        ${holiday ? `<div class="cal-holiday-label" data-tooltip="🎉 ${holiday}">🎉 ${holiday}</div>` : ''}
         ${data ? `<div class="cal-day-total">${formatDurationShort(data.totalMs)}</div>` : ''}
         <div class="cal-day-tasks">${taskPills}</div>
       </div>`;
@@ -850,6 +846,46 @@ async function renderCalendar() {
     </div>`;
 
   document.getElementById('calendar-container').innerHTML = html;
+  // Tooltip logic for holiday labels
+  document.querySelectorAll('.cal-holiday-label').forEach(el => {
+    el.addEventListener('mouseenter', () => {
+      const tip = document.createElement('div');
+      tip.id = 'cal-tooltip';
+      tip.textContent = el.dataset.tooltip;
+      tip.style.cssText = `
+      position:fixed; background:#1e1e2e; border:1px solid #f59e0b40;
+      color:#f59e0b; font-size:11px; padding:5px 10px; border-radius:6px;
+      white-space:nowrap; z-index:9999; box-shadow:0 4px 12px #00000060;
+      pointer-events:none; opacity:0;
+    `;
+      document.body.appendChild(tip);
+
+      const rect = el.getBoundingClientRect();
+      const tipW = tip.offsetWidth;
+      const tipH = tip.offsetHeight;
+
+      // Position above the label
+      let left = rect.left;
+      let top = rect.top - tipH - 6;
+
+      // Prevent right overflow
+      if (left + tipW > window.innerWidth - 8) {
+        left = window.innerWidth - tipW - 8;
+      }
+
+      // Prevent top overflow
+      if (top < 8) {
+        top = rect.bottom + 6;
+      }
+
+      tip.style.left = left + 'px';
+      tip.style.top = top + 'px';
+      tip.style.opacity = '1';
+    });
+    el.addEventListener('mouseleave', () => {
+      document.getElementById('cal-tooltip')?.remove();
+    });
+  });
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

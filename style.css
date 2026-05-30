@@ -470,10 +470,11 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
   gap: 0;
   margin-top: 12px;
   border-radius: 12px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--border);
   width: 100%;
   table-layout: fixed;
+  border-radius: 12px
 }
 .cal-day-header {
   text-align: center;
@@ -487,6 +488,8 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
   letter-spacing: 0.06em;
 }
 .cal-day {
+  min-width: 0;
+  overflow: visible;
   background: #0f0f18;
   min-height: 90px;
   padding: 8px 10px;
@@ -495,6 +498,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
   cursor: pointer;
   transition: background 0.15s;
   position: relative;
+  overflow: visible;
 }
 .cal-day:hover { background: #161620; }
 .cal-day:nth-child(7n) { border-right: none; }
@@ -564,15 +568,6 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
   margin-right: 5px;
 }
 .cal-day.is-holiday { border-top: 2px solid #f59e0b40; }
-.cal-holiday-label {
-  font-size: 9px;
-  color: #f59e0b;
-  font-weight: 600;
-  margin-bottom: 3px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .cal-day.weekend { background: #1a0f0f; }
 .cal-day.weekend:hover { background: #221515; }
 .cal-day.weekend .cal-day-num { color: #ef444480; }
@@ -584,16 +579,17 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
   padding: 28px 20px;
   overflow-x: hidden;
 }
-.cal-day {
-  min-width: 0;
-  overflow: hidden;
-}
 .cal-holiday-label {
   font-size: 8px;
+  color: #f59e0b;
+  font-weight: 600;
+  margin-bottom: 3px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+  position: relative;
+  cursor: default;
 }
 
 .hidden { display: none; }
