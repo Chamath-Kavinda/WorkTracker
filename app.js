@@ -972,8 +972,7 @@ function renderTasksPage() {
 
   // ── Group by date (newest first) ──────────────────────────────────────────
   const today    = todayStr();
-  const yesterday = (() => { const d = new Date(); d.setDate(d.getDate()-1);
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+  const yesterday = localDateStr(new Date(Date.now() - 864e5));
 
   const groups = {};
   tasks.forEach(task => {
@@ -1035,10 +1034,15 @@ function updateDashboardStats() {
 function calcDayStreak() {
   const datesWithWork = new Set(state.sessions.map(s => s.date));
   let streak = 0;
-  const d = new Date();
+  // Use a UTC timestamp and step back in exact 24-hour increments.
+  // localDateStr() then maps each timestamp to the correct calendar date
+  // in the user's chosen timezone via Intl.DateTimeFormat — so this is
+  // consistent with todayStr() and all other date calculations regardless
+  // of how the OS timezone differs from the user's selected country.
+  let ts = Date.now();
   let checkingToday = true;
   while (true) {
-    const dateKey = localDateStr(d); // uses user's selected timezone
+    const dateKey = localDateStr(new Date(ts));
 
     if (datesWithWork.has(dateKey)) {
       streak++;
@@ -1047,13 +1051,13 @@ function calcDayStreak() {
       // Allow skipping today if it has no sessions yet (day just started)
       if (checkingToday) {
         checkingToday = false;
-        d.setDate(d.getDate() - 1);
+        ts -= 864e5; // step back exactly 24 hours
         continue;
       }
       break; // gap found — streak ends
     }
 
-    d.setDate(d.getDate() - 1);
+    ts -= 864e5; // step back exactly 24 hours
     if (streak > 3650) break; // safety cap (10 years)
   }
   return streak;
@@ -1310,7 +1314,7 @@ function renderReport(dateStr) {
   // Total
   const totalEl = document.getElementById('report-total');
   totalEl.innerHTML = `
-    <div class="report-total-label">Total Work Time — ${new Date(date).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
+    <div class="report-total-label">Total Work Time — ${new Date(date + 'T00:00:00').toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
     <div class="report-total-value">${formatDurationShort(grandTotal)}</div>
   `;
 
@@ -1371,7 +1375,7 @@ function generateReportText(date) {
   });
 
   let text = `WorkTracker Report\n`;
-  text += `Date: ${new Date(d).toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}\n`;
+  text += `Date: ${new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}\n`;
   text += `Generated: ${new Date().toLocaleString()}\n`;
   text += '═'.repeat(60) + '\n\n';
 
@@ -1526,7 +1530,7 @@ async function exportReport(format) {
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     const d = date || todayStr();
-    doc.text(new Date(d).toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), pageW - margin, 18, { align: 'right' });
+    doc.text(new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), pageW - margin, 18, { align: 'right' });
 
     y = 40;
 
