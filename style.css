@@ -69,6 +69,136 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 .app-title { font-weight: 700; font-size: 13px; letter-spacing: 0.04em; color: var(--text-primary); }
 
 .titlebar-controls { display: flex; align-items: center; gap: 2px; }
+
+/* ── Notification Bell ─────────────────────────────────────────────────────── */
+.titlebar-auth { display: flex; align-items: center; gap: 8px; position: relative; }
+
+.notif-bell-btn {
+  position: relative; background: transparent; border: none; cursor: pointer;
+  color: var(--text-secondary); padding: 5px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s;
+  -webkit-app-region: no-drag;
+}
+.notif-bell-btn:hover { background: #ffffff0d; color: var(--text-primary); }
+.notif-bell-btn.has-notifs { color: #f87171; }
+
+.notif-bell-icon { display: block; transition: color 0.2s; }
+
+/* Bell shake animation when there are notifications */
+@keyframes bell-shake {
+  0%,100% { transform: rotate(0deg); }
+  10%,30%,50%,70%,90% { transform: rotate(-14deg); }
+  20%,40%,60%,80% { transform: rotate(14deg); }
+}
+/* Shake for first 32% of 5s cycle (~1.6s), then rest until next cycle */
+@keyframes bell-shake-loop {
+  0%    { transform: rotate(0deg); }
+  3%,9%,15%,21%,27% { transform: rotate(-14deg); }
+  6%,12%,18%,24%    { transform: rotate(14deg); }
+  32%,100% { transform: rotate(0deg); }
+}
+.notif-bell-btn.has-notifs .notif-bell-icon {
+  animation: bell-shake-loop 5s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+.notif-dot {
+  position: absolute; top: 0; right: 0;
+  line-height: 0; pointer-events: none;
+  animation: notif-pop 0.3s cubic-bezier(.34,1.56,.64,1) forwards;
+}
+@keyframes notif-pop {
+  from { transform: scale(0); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+/* Dropdown panel */
+.notif-dropdown {
+  position: absolute; top: calc(100% + 10px); right: 0;
+  width: 320px; max-height: 420px; overflow-y: auto;
+  background: #1a1a24; border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: 0 12px 40px #00000070;
+  z-index: 9999; padding: 6px 0;
+  -webkit-app-region: no-drag;
+}
+.notif-dropdown-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px 8px; border-bottom: 1px solid var(--border);
+  font-size: 12px; font-weight: 700; color: var(--text-secondary);
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.notif-clear-btn {
+  background: none; border: none; cursor: pointer; font-size: 11px;
+  color: #7c6af7; font-weight: 600; padding: 2px 6px; border-radius: 4px;
+  transition: background 0.15s;
+}
+.notif-clear-btn:hover { background: #7c6af710; }
+
+.notif-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid #ffffff06;
+  cursor: default; transition: background 0.12s;
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover { background: #ffffff06; }
+.notif-item-icon {
+  width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px;
+}
+.notif-item-icon.urgent { background: #ef444415; }
+.notif-item-icon.warning { background: #f59e0b15; }
+.notif-item-icon.info    { background: #7c6af715; }
+.notif-item-body { flex: 1; min-width: 0; }
+.notif-item-title {
+  font-size: 12.5px; font-weight: 600; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.notif-item-desc {
+  font-size: 11.5px; color: var(--text-muted); margin-top: 2px; line-height: 1.4;
+}
+.notif-empty {
+  padding: 28px 14px; text-align: center;
+  color: var(--text-muted); font-size: 13px;
+}
+
+/* read/unread states */
+.notif-item.read { opacity: 0.5; }
+.notif-item.read .notif-item-title { font-weight: 400; }
+.notif-item:not(.read) .notif-item-title { font-weight: 700; }
+.notif-item:not(.read) .notif-item-desc  { color: var(--text-secondary); }
+
+/* mark-read button */
+.notif-read-btn {
+  flex-shrink: 0; background: none; border: 1px solid #ffffff15;
+  border-radius: 6px; cursor: pointer; color: #7c6af7;
+  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+.notif-read-btn:hover { background: #7c6af715; border-color: #7c6af740; }
+.notif-read-done { color: #22c55e; font-size: 13px; flex-shrink: 0; padding: 0 4px; }
+
+/* unread badge in header */
+.notif-unread-badge {
+  display: inline-block; background: #ef4444; color: #fff;
+  font-size: 10px; font-weight: 700; border-radius: 8px;
+  padding: 1px 6px; margin-left: 5px; vertical-align: middle;
+}
+
+/* show more button */
+.notif-show-more-bar {
+  padding: 6px 14px 8px; border-top: 1px solid #ffffff08; text-align: center;
+}
+.notif-show-more-btn {
+  background: none; border: none; cursor: pointer; color: #7c6af7;
+  font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px;
+  transition: background 0.15s;
+}
+.notif-show-more-btn:hover { background: #7c6af710; }
+
+/* dropdown header row — align mark-all + view planner side by side */
+.notif-dropdown-header > div { gap: 4px !important; }
 .tb-btn {
   width: 30px; height: 30px; border: none; background: transparent; cursor: pointer;
   border-radius: 6px; display: flex; align-items: center; justify-content: center;
@@ -248,16 +378,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 .task-btn.start:hover { background: #10b98115; color: var(--success); border-color: #10b98140; }
 .task-btn.pause-btn:hover { background: #f59e0b15; color: var(--warning); border-color: #f59e0b40; }
 .task-btn.stop-btn:hover { background: #ef444415; color: var(--danger); border-color: #ef444440; }
-.task-btn.delete { color: #ef444480; border-color: transparent; background: transparent; }
 .task-btn.delete:hover { background: #ef444415; color: var(--danger); border-color: #ef444440; }
-
-/* ── Locked task badge ── */
-.task-locked-badge {
-  font-size: 10.5px; color: #f59e0b99; background: #f59e0b10;
-  border: 1px solid #f59e0b20; border-radius: 4px; padding: 1px 6px;
-  font-weight: 500;
-}
-.task-card.locked-day { opacity: 0.75; }
 
 /* ── Filter Bar ── */
 .filter-bar { display: flex; gap: 6px; margin-bottom: 20px; }
@@ -268,35 +389,6 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 }
 .filter-btn:hover { background: #ffffff08; color: var(--text-primary); }
 .filter-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--border-active); }
-
-/* ── Category filter bar ── */
-.category-filter-bar {
-  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px;
-}
-.cat-filter-btn {
-  padding: 5px 13px; border-radius: 20px; border: 1px solid var(--border);
-  background: transparent; cursor: pointer; font-family: var(--font-ui); font-size: 11.5px;
-  font-weight: 500; color: var(--text-secondary); transition: all 0.15s; white-space: nowrap;
-}
-.cat-filter-btn:hover { background: #ffffff08; color: var(--text-primary); }
-.cat-filter-btn.active { background: #2a2440; color: #c4b5fd; border-color: #7c6af760; }
-
-/* ── Date group headers ── */
-.date-group-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 2px 8px; margin-top: 6px;
-}
-.date-group-header:first-child { padding-top: 4px; margin-top: 0; }
-.date-group-label {
-  font-size: 13px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.2px;
-}
-.date-group-sub {
-  font-size: 11.5px; font-weight: 400; color: var(--text-muted); margin-left: 8px;
-}
-.date-group-count {
-  font-size: 11px; font-weight: 500; color: var(--text-muted);
-  background: #ffffff08; border-radius: 10px; padding: 2px 9px;
-}
 
 /* ── Buttons ── */
 .btn-primary {
@@ -802,7 +894,10 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 .version-due-badge.ok { background: #10b98115; border-color: #10b98130; color: #10b981; }
 .version-due-badge.soon { background: #f59e0b15; border-color: #f59e0b30; color: #f59e0b; }
 .version-due-badge.overdue { background: #ef444415; border-color: #ef444430; color: #ef4444; }
-.version-due-badge.pending { background: #ffffff08; border-color: var(--border); color: var(--text-muted); }
+.version-due-badge.pending  { background: #ffffff08; border-color: var(--border); color: var(--text-muted); }
+.version-due-badge.today    { background: #f9731615; border-color: #f9731640; color: #fb923c; font-weight: 700; }
+.version-due-badge.released { background: #10b98115; border-color: #10b98140; color: #34d399; font-weight: 700; }
+.version-due-badge.failed   { background: #ef444415; border-color: #ef444440; color: #f87171; font-weight: 700; }
 .version-locked-badge {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 10px; font-weight: 600; color: var(--danger);

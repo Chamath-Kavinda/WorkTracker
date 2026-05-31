@@ -364,9 +364,11 @@ function updateAuthUI(user) {
   const settingsOut = document.getElementById('settings-account-signed-out');
   const settingsIn  = document.getElementById('settings-account-signed-in');
 
+  const bellBtn = document.getElementById('notif-bell-btn');
   if (user) {
     profile.style.display = 'flex';
     signInBtn.style.display = 'none';
+    if (bellBtn) bellBtn.style.display = 'flex';
     const avatar = document.getElementById('auth-avatar');
     avatar.src = user.photoURL || '';
     avatar.style.display = user.photoURL ? '' : 'none';
@@ -379,6 +381,7 @@ function updateAuthUI(user) {
   } else {
     profile.style.display = 'none';
     signInBtn.style.display = '';
+    if (bellBtn) { bellBtn.style.display = 'none'; document.getElementById('notif-dropdown').style.display = 'none'; }
     if (settingsOut) {
       settingsOut.style.display = '';
       settingsIn.style.display = 'none';
@@ -451,6 +454,37 @@ let state = {
 };
 let selectedCountry = 'LK';
 
+// IANA timezone for each country in the settings dropdown
+const COUNTRY_TIMEZONE = {
+  LK: 'Asia/Colombo',
+  US: 'America/New_York',
+  GB: 'Europe/London',
+  IN: 'Asia/Kolkata',
+  AU: 'Australia/Sydney',
+  SG: 'Asia/Singapore',
+  DE: 'Europe/Berlin',
+  FR: 'Europe/Paris',
+  JP: 'Asia/Tokyo',
+  CA: 'America/Toronto',
+};
+
+// Returns the IANA timezone string for the currently selected country
+function getUserTimezone() {
+  return COUNTRY_TIMEZONE[selectedCountry] || Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+// Returns a YYYY-MM-DD string in the user's local timezone
+function localDateStr(date) {
+  const d = date || new Date();
+  const tz = getUserTimezone();
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(d);
+  const get = (type) => parts.find(p => p.type === type)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
 // ── Utilities ────────────────────────────────────────────────────────────────
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -487,12 +521,8 @@ function formatDate(iso) {
 }
 
 function todayStr() {
-  // Use local date components — toISOString() returns UTC which breaks timezone offsets like LK (UTC+5:30)
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  // Uses the user's selected country timezone — no hardcoding
+  return localDateStr(new Date());
 }
 
 function getTaskTotalMs(taskId, forDate = null) {
@@ -647,14 +677,14 @@ function startTimerInterval() {
 function checkMidnightAutoComplete() {
   if (!state.activeTaskId || !state.activeSessionStart) return;
 
-  const startDate = new Date(state.activeSessionStart).toLocaleDateString('en-CA'); // YYYY-MM-DD local
+  const startDate = localDateStr(new Date(state.activeSessionStart)); // user-timezone date
   const today     = todayStr();
 
   if (startDate === today) return; // same day, nothing to do
 
   const task = state.tasks.find(t => t.id === state.activeTaskId);
 
-  // Calculate the midnight boundary (start of today in ms)
+  // Midnight boundary = start of today in the user's timezone (approximated as local midnight)
   const midnightToday = new Date(today + 'T00:00:00').getTime();
 
   // Duration = from session start → midnight of start day
@@ -745,6 +775,7 @@ function renderAll() {
   renderActiveTimerCard();
   updateDashboardStats();
   if (state.currentPage === 'report') renderReport();
+  renderNotifBell();
 }
 
 function renderActiveTimerCard() {
@@ -1002,20 +1033,12 @@ function updateDashboardStats() {
 }
 
 function calcDayStreak() {
-  // Collect all unique dates that have at least one session
   const datesWithWork = new Set(state.sessions.map(s => s.date));
-
   let streak = 0;
   const d = new Date();
-
-  // Walk backwards day by day from today
-  // If today has no sessions yet, still allow streak if yesterday does (don't break on today)
   let checkingToday = true;
   while (true) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    const dateKey = `${y}-${m}-${day}`;
+    const dateKey = localDateStr(d); // uses user's selected timezone
 
     if (datesWithWork.has(dateKey)) {
       streak++;
@@ -1034,6 +1057,192 @@ function calcDayStreak() {
     if (streak > 3650) break; // safety cap (10 years)
   }
   return streak;
+}
+
+// ── Planner Version Notifications ─────────────────────────────────────────────
+// readNotifIds: set of version IDs the user has manually marked as read
+const _readNotifIds = new Set();
+
+function getVersionNotifications() {
+  const notifications = [];
+  const today = todayStr();
+
+  plannerState.versions.forEach(ver => {
+    if (!ver.dueDate || ver.pending) return;
+    const tasks = plannerState.plannerTasks.filter(t => t.versionId === ver.id);
+    if (tasks.length === 0) return;
+    const allDone = tasks.every(t => t.done);
+    if (allDone) return;
+
+    const project = plannerState.projects.find(p => p.id === ver.projectId);
+    const projectName = project?.name || 'Unknown Project';
+    const dueDate   = new Date(ver.dueDate + 'T00:00:00');
+    const todayDate = new Date(today + 'T00:00:00');
+    const daysLeft  = Math.round((dueDate - todayDate) / (1000 * 60 * 60 * 24));
+    const doneCnt   = tasks.filter(t => t.done).length;
+    const totalCnt  = tasks.length;
+    const remaining = totalCnt - doneCnt;
+
+    let urgency, icon, message;
+
+    if (daysLeft <= 0) {
+      urgency = 'urgent'; icon = '🚨';
+      message = daysLeft === 0
+        ? `Release day! ${remaining} task${remaining !== 1 ? 's' : ''} still pending`
+        : `Overdue by ${Math.abs(daysLeft)} day${Math.abs(daysLeft) !== 1 ? 's' : ''} — ${remaining} unfinished`;
+    } else if (daysLeft === 1) {
+      urgency = 'urgent'; icon = '⚡';
+      message = `Due tomorrow! ${remaining} task${remaining !== 1 ? 's' : ''} not done`;
+    } else if (daysLeft === 2) {
+      urgency = 'warning'; icon = '⚠️';
+      message = `Due in 2 days — ${remaining} task${remaining !== 1 ? 's' : ''} remaining`;
+    } else if (daysLeft === 3) {
+      urgency = 'warning'; icon = '📅';
+      message = `Due in 3 days — ${remaining} of ${totalCnt} tasks pending`;
+    } else {
+      return;
+    }
+
+    notifications.push({
+      id: ver.id,
+      urgency, icon,
+      title: `${projectName} · ${ver.name}`,
+      message, daysLeft,
+      read: _readNotifIds.has(ver.id),
+    });
+  });
+
+  // Any version that was unread and is now all-done → auto-clear from read set
+  // (so if tasks change it shows fresh again)
+  notifications.sort((a, b) => a.daysLeft - b.daysLeft);
+  return notifications;
+}
+
+function _buildNotifDropdown(notifs) {
+  const dropdown = document.getElementById('notif-dropdown');
+  if (!dropdown) return;
+
+  const unreadNotifs = notifs.filter(n => !n.read);
+  const hasUnread    = unreadNotifs.length > 0;
+
+  // Show first 3 inline, rest in "show more"
+  const INLINE_LIMIT = 3;
+
+  if (notifs.length === 0) {
+    dropdown.innerHTML = `<div class="notif-empty">✅ No reminders — you're all caught up!</div>`;
+    return;
+  }
+
+  const renderItem = (n) => `
+    <div class="notif-item${n.read ? ' read' : ''}" data-notif-id="${n.id}">
+      <div class="notif-item-icon ${n.urgency}">${n.icon}</div>
+      <div class="notif-item-body">
+        <div class="notif-item-title">${n.title}</div>
+        <div class="notif-item-desc">${n.message}</div>
+      </div>
+      ${!n.read ? `<button class="notif-read-btn" title="Mark as read" data-read-id="${n.id}">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M4.5 7l2 2 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>` : '<span class="notif-read-done" title="Read">✓</span>'}
+    </div>`;
+
+  const visibleItems = notifs.slice(0, INLINE_LIMIT);
+  const hiddenItems  = notifs.slice(INLINE_LIMIT);
+
+  dropdown.innerHTML = `
+    <div class="notif-dropdown-header">
+      <span>🔔 Reminders ${hasUnread ? `<span class="notif-unread-badge">${unreadNotifs.length} new</span>` : ''}</span>
+      <div style="display:flex;gap:6px;align-items:center">
+        ${hasUnread ? `<button class="notif-clear-btn" id="notif-mark-all-read">Mark all read</button>` : ''}
+        <button class="notif-clear-btn" id="notif-go-planner">View Planner</button>
+      </div>
+    </div>
+    ${visibleItems.map(renderItem).join('')}
+    ${hiddenItems.length > 0 ? `
+      <div id="notif-show-more-bar" class="notif-show-more-bar">
+        <button id="notif-show-more-btn" class="notif-show-more-btn">
+          Show ${hiddenItems.length} more ▾
+        </button>
+      </div>
+      <div id="notif-hidden-items" style="display:none">
+        ${hiddenItems.map(renderItem).join('')}
+      </div>` : ''}`;
+
+  // Show more toggle
+  dropdown.querySelector('#notif-show-more-btn')?.addEventListener('click', () => {
+    const hidden = dropdown.querySelector('#notif-hidden-items');
+    const bar    = dropdown.querySelector('#notif-show-more-bar');
+    hidden.style.display = 'block';
+    bar.style.display    = 'none';
+  });
+
+  // Mark all read
+  dropdown.querySelector('#notif-mark-all-read')?.addEventListener('click', () => {
+    notifs.forEach(n => _readNotifIds.add(n.id));
+    renderNotifBell();
+  });
+
+  // Individual mark-read buttons
+  dropdown.querySelectorAll('.notif-read-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _readNotifIds.add(btn.dataset.readId);
+      renderNotifBell();
+    });
+  });
+
+  // Go to planner
+  dropdown.querySelector('#notif-go-planner')?.addEventListener('click', () => {
+    dropdown.style.display = 'none';
+    document.querySelector('[data-page="planner"]')?.click();
+  });
+}
+
+function renderNotifBell() {
+  const btn      = document.getElementById('notif-bell-btn');
+  const dot      = document.getElementById('notif-dot');
+  const dropdown = document.getElementById('notif-dropdown');
+  if (!btn) return;
+
+  const notifs    = getVersionNotifications();
+  const unread    = notifs.filter(n => !n.read);
+  const hasUnread = unread.length > 0;
+  const hasAny    = notifs.length > 0;
+
+  // Badge + bell color: only when there are UNREAD notifications
+  dot.style.display = hasUnread ? 'block' : 'none';
+  btn.classList.toggle('has-notifs', hasUnread);
+
+  // Shake animation handled by CSS bell-shake-loop (5s repeat) when has-notifs class is present
+
+  // Rebuild dropdown if it's currently open
+  if (dropdown.style.display === 'block') {
+    _buildNotifDropdown(notifs);
+  }
+}
+
+function initNotifBell() {
+  const btn      = document.getElementById('notif-bell-btn');
+  const dropdown = document.getElementById('notif-dropdown');
+  if (!btn) return;
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = dropdown.style.display === 'block';
+    dropdown.style.display = open ? 'none' : 'block';
+    if (!open) {
+      const notifs = getVersionNotifications();
+      _buildNotifDropdown(notifs);
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!btn.contains(e.target) && !dropdown.contains(e.target)) {
+      dropdown.style.display = 'none';
+    }
+  });
 }
 
 // ── Report ────────────────────────────────────────────────────────────────────
@@ -1260,7 +1469,9 @@ async function loadSettings() {
     const settings = await api.loadSettings();
     settings.country = e.target.value;
     await api.saveSettings(settings);
-    showNotif(`Holidays updated for ${e.target.options[e.target.selectedIndex].text}`, 'info');
+    const tz = COUNTRY_TIMEZONE[e.target.value] || 'system default';
+    showNotif(`Timezone set to ${e.target.options[e.target.selectedIndex].text} (${tz})`, 'info');
+    renderAll(); // re-render everything with new timezone
     if (state.currentPage === 'calendar') renderCalendar().catch(console.error);
   });
 }
@@ -1680,6 +1891,7 @@ async function init() {
 
   // Init Auth UI
   initAuthUI();
+  initNotifBell();
 
   // Close modal on overlay click
   document.getElementById('modal-overlay').addEventListener('click', (e) => {
@@ -1728,29 +1940,39 @@ async function savePlannerData() {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function isVersionLocked(version) {
   if (!version.dueDate || version.pending) return false;
-  const due = new Date(version.dueDate);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const due = new Date(version.dueDate + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
-  return due <= today;
+  return due < today; // locked only if PAST due, not on the due date itself
 }
 
 function getDueBadge(version) {
   if (version.pending || !version.dueDate) {
     return `<span class="version-due-badge pending">⏳ Pending</span>`;
   }
-  const due = new Date(version.dueDate);
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const diff = Math.ceil((due - today) / 86400000);
-  if (diff < 0) return `<span class="version-due-badge overdue">🔒 Overdue · ${formatShortDate(version.dueDate)}</span>`;
-  if (diff === 0) return `<span class="version-due-badge soon">⚠ Due Today</span>`;
-  if (diff <= 7) return `<span class="version-due-badge soon">⚠ ${diff}d left · ${formatShortDate(version.dueDate)}</span>`;
+
+  // Use local date arithmetic — never parse without T00:00:00 to avoid UTC offset issues
+  const due   = new Date(version.dueDate + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0); due.setHours(0, 0, 0, 0);
+  const diff  = Math.round((due - today) / 86400000); // exact local days
+
+  const tasks   = plannerState.plannerTasks.filter(t => t.versionId === version.id);
+  const allDone = tasks.length > 0 && tasks.every(t => t.done);
+
+  if (diff < 0) {
+    // Past due — locked. Show Released or Failed
+    if (allDone) return `<span class="version-due-badge released">🚀 Released</span>`;
+    return `<span class="version-due-badge failed">💥 Failed to Release</span>`;
+  }
+  if (diff === 0) return `<span class="version-due-badge today">🔥 Due Today · ${formatShortDate(version.dueDate)}</span>`;
+  if (diff === 1) return `<span class="version-due-badge soon">⚡ 1d left · ${formatShortDate(version.dueDate)}</span>`;
+  if (diff <= 7)  return `<span class="version-due-badge soon">⚠ ${diff}d left · ${formatShortDate(version.dueDate)}</span>`;
   return `<span class="version-due-badge ok">📅 ${formatShortDate(version.dueDate)}</span>`;
 }
 
 function formatShortDate(iso) {
   if (!iso) return '';
-  return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(iso + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 // ── Render Projects ───────────────────────────────────────────────────────────
