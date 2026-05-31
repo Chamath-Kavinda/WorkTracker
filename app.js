@@ -455,6 +455,160 @@ function initAuthUI() {
   });
 }
 
+// ── Custom Dark Date Picker ──────────────────────────────────────────────────
+// Generic factory — used for both the report picker and the planner version picker
+function _makeDatePicker(cfg) {
+  // cfg = { wrapperId, pickerId, monthLabelId, dowId, daysId, inputId, displayId, onSelect }
+  const state = { year: 0, month: 0, selected: null };
+
+  function todayStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+
+  function toggle() {
+    const dp = document.getElementById(cfg.pickerId);
+    if (!dp) return;
+    const isOpen = dp.style.display !== 'none';
+    if (isOpen) { dp.style.display = 'none'; return; }
+    const today = new Date();
+    if (state.selected) {
+      const [y, m] = state.selected.split('-').map(Number);
+      state.year = y; state.month = m - 1;
+    } else { state.year = today.getFullYear(); state.month = today.getMonth(); }
+    render();
+    dp.style.display = '';
+  }
+
+  function render() {
+    const MONTHS = ['January','February','March','April','May','June',
+                    'July','August','September','October','November','December'];
+    const DAYS_SHORT = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+    document.getElementById(cfg.monthLabelId).textContent = `${MONTHS[state.month]} ${state.year}`;
+    document.getElementById(cfg.dowId).innerHTML = DAYS_SHORT.map(d =>
+      `<div style="text-align:center;font-size:10px;font-weight:700;color:#55556a;padding:3px 0;">${d}</div>`
+    ).join('');
+    const daysEl = document.getElementById(cfg.daysId);
+    const firstDow = new Date(state.year, state.month, 1).getDay();
+    const daysInMonth = new Date(state.year, state.month + 1, 0).getDate();
+    // Use global todayStr() so timezone setting is respected
+    const tStr = (typeof window !== 'undefined' && window.todayStr) ? window.todayStr() : (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+    let html = '';
+    for (let i = 0; i < firstDow; i++) html += '<div></div>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ds = `${state.year}-${String(state.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const isSel = ds === state.selected;
+      const isToday = ds === tStr;
+      const isPast = cfg.disablePast && !isToday && ds < tStr;
+      let bg = '#00000000', color = isPast ? '#3a3a4a' : '#c0c0d0', border = '1.5px solid transparent', fw = '400';
+      if (isSel) { bg = '#7c6af7'; color = '#fff'; fw = '700'; }
+      else if (isToday) { border = '1.5px solid #7c6af760'; color = '#a89af9'; fw = '600'; }
+      if (isPast) {
+        html += `<div style="text-align:center;padding:5px 2px;font-size:12px;color:#3a3a4a;cursor:not-allowed;">${d}</div>`;
+      } else {
+        html += `<button data-sel="${isSel?'1':'0'}" onclick="${cfg.fnPrefix}SelectDay('${ds}')"
+          style="background:${bg};color:${color};border:${border};border-radius:6px;
+                 padding:5px 2px;font-size:12px;font-weight:${fw};cursor:pointer;
+                 font-family:var(--font-ui);transition:background .12s;text-align:center;width:100%;"
+          onmouseover="if(this.dataset.sel!=='1')this.style.background='#2a2a3a'"
+          onmouseout="if(this.dataset.sel!=='1')this.style.background='#00000000'"
+          >${d}</button>`;
+      }
+    }
+    daysEl.innerHTML = html;
+  }
+
+  function nav(dir) {
+    state.month += dir;
+    if (state.month > 11) { state.month = 0; state.year++; }
+    if (state.month < 0)  { state.month = 11; state.year--; }
+    render();
+  }
+
+  function selectDay(ds) {
+    state.selected = ds;
+    const inp = document.getElementById(cfg.inputId);
+    if (inp) { inp.value = ds; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+    updateLabel(ds);
+    document.getElementById(cfg.pickerId).style.display = 'none';
+    if (cfg.onSelect) cfg.onSelect(ds);
+  }
+
+  function updateLabel(ds) {
+    const el = document.getElementById(cfg.displayId);
+    if (!el) return;
+    if (!ds) { el.textContent = '—'; return; }
+    const [y, m, d] = ds.split('-').map(Number);
+    el.textContent = `${String(m).padStart(2,'0')}/${String(d).padStart(2,'0')}/${y}`;
+  }
+
+  function goToday() { selectDay(todayStr()); }
+
+  function setValue(ds) {
+    state.selected = ds || null;
+    updateLabel(ds || null);
+  }
+
+  // Close on outside click (works for both absolute and fixed positioned dropdowns)
+  document.addEventListener('click', (e) => {
+    const wrapper = document.getElementById(cfg.wrapperId);
+    const dp = document.getElementById(cfg.pickerId);
+    if (dp && dp.style.display !== 'none') {
+      const clickedWrapper = wrapper && wrapper.contains(e.target);
+      const clickedPicker = dp.contains(e.target);
+      if (!clickedWrapper && !clickedPicker) dp.style.display = 'none';
+    }
+  });
+
+  return { toggle, nav, selectDay, goToday, setValue, getSelected: () => state.selected };
+}
+
+// ── Report date picker instance ────────────────────────────────────────────────
+const _cdp = _makeDatePicker({
+  wrapperId: 'report-date-wrapper', pickerId: 'custom-date-picker',
+  monthLabelId: 'cdp-month-label', dowId: 'cdp-dow', daysId: 'cdp-days',
+  inputId: 'report-date', displayId: 'report-date-display',
+  fnPrefix: 'cdp',
+});
+function toggleCustomDatePicker() { _cdp.toggle(); }
+function cdpNav(dir) { _cdp.nav(dir); }
+function cdpSelectDay(ds) { _cdp.selectDay(ds); }
+function cdpToday() { _cdp.goToday(); }
+function _cdpUpdateLabel(ds) { _cdp.setValue(ds); }
+
+// ── Planner version date picker instance ──────────────────────────────────────
+const _pdp = _makeDatePicker({
+  wrapperId: 'planner-duedate-wrapper', pickerId: 'planner-custom-date-picker',
+  monthLabelId: 'pdp-month-label', dowId: 'pdp-dow', daysId: 'pdp-days',
+  inputId: 'planner-version-duedate', displayId: 'planner-duedate-display',
+  fnPrefix: 'pdp', disablePast: true,
+  onSelect: (ds) => {
+    // Uncheck pending when a date is chosen
+    const pending = document.getElementById('planner-version-pending');
+    if (pending && ds) { pending.checked = false; updateVersionDueDateState(); }
+  }
+});
+function togglePlannerDatePicker() {
+  const dp = document.getElementById('planner-custom-date-picker');
+  if (!dp) return;
+  if (dp.style.display !== 'none') { dp.style.display = 'none'; return; }
+  const btn = document.getElementById('planner-duedate-btn');
+  if (!btn) { _pdp.toggle(); return; }
+  const r = btn.getBoundingClientRect();
+  // Let _pdp render content first (sets display:'')
+  _pdp.toggle();
+  // Now measure and reposition upward
+  dp.style.position = 'fixed';
+  dp.style.left = r.left + 'px';
+  dp.style.zIndex = '99999';
+  const dpH = dp.offsetHeight;
+  const topUp = r.top - dpH - 6;
+  dp.style.top = (topUp < 8 ? r.bottom + 6 : topUp) + 'px';
+}
+function pdpNav(dir) { _pdp.nav(dir); }
+function pdpSelectDay(ds) { _pdp.selectDay(ds); }
+function pdpToday() { _pdp.goToday(); }
+
 // ── State ────────────────────────────────────────────────────────────────────
 let state = {
   tasks: [],
@@ -675,6 +829,7 @@ function todayStr() {
   // Uses the user's selected country timezone — no hardcoding
   return localDateStr(new Date());
 }
+window.todayStr = todayStr;
 
 function getTaskTotalMs(taskId, forDate = null) {
   const sessions = state.sessions.filter(s => {
@@ -2397,7 +2552,7 @@ function switchReportView(view) {
   reportView = view;
   const sel = document.getElementById('report-view-select');
   if (sel) sel.value = view;
-  document.getElementById('report-date').style.display = view === 'daily' ? '' : 'none';
+  document.getElementById('report-date-wrapper').style.display = view === 'daily' ? '' : 'none';
   document.getElementById('report-week-nav').style.display = view === 'weekly' ? 'flex' : 'none';
   document.getElementById('report-month-nav').style.display = view === 'monthly' ? 'flex' : 'none';
   // Show toggle for ALL views
@@ -3335,7 +3490,7 @@ async function renderCalendar() {
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     html += `
       <div class="cal-day ${isToday ? 'today' : ''} ${hasWork ? 'has-work' : ''} ${holiday ? 'is-holiday' : ''} ${isWeekend ? 'weekend' : ''}"
-           onclick="switchPage('report'); document.getElementById('report-date').value='${dateKey}'; renderReport('${dateKey}')">
+           onclick="switchPage('report'); document.getElementById('report-date').value='${dateKey}'; _cdp.selected='${dateKey}'; _cdpUpdateLabel('${dateKey}'); renderReport('${dateKey}')">
         <div class="cal-day-num">${d}</div>
         ${holiday ? `<div class="cal-holiday-label" data-tooltip="🎉 ${holiday}">🎉 ${holiday}</div>` : ''}
         ${data ? `<div class="cal-day-total">${formatDurationShort(data.totalMs)}</div>` : ''}
@@ -3401,7 +3556,10 @@ async function init() {
   await loadSettings();
 
   // Set today's date in report
-  document.getElementById('report-date').value = todayStr();
+  const _initDateStr = todayStr();
+  document.getElementById('report-date').value = _initDateStr;
+  _cdp.selected = _initDateStr;
+  _cdpUpdateLabel(_initDateStr);
 
   updateDateDisplay();
   setInterval(updateDateDisplay, 60000);
@@ -4233,6 +4391,7 @@ function openVersionModal(versionId) {
   document.getElementById('planner-version-name').value = ver?.name || '';
   document.getElementById('planner-version-desc').value = ver?.desc || '';
   document.getElementById('planner-version-duedate').value = ver?.dueDate || '';
+  _pdp.setValue(ver?.dueDate || null);
   document.getElementById('planner-version-pending').checked = ver ? (ver.pending || !ver.dueDate) : true;
 
   updateVersionDueDateState();
@@ -4245,8 +4404,10 @@ function updateVersionDueDateState() {
   const pending = document.getElementById('planner-version-pending').checked;
   const dateInput = document.getElementById('planner-version-duedate');
   dateInput.disabled = pending;
-  dateInput.style.opacity = pending ? '0.4' : '1';
-  if (pending) dateInput.value = '';   // ← add this
+  const wrapper = document.getElementById('planner-duedate-wrapper');
+  if (wrapper) wrapper.style.opacity = pending ? '0.4' : '1';
+  if (wrapper) wrapper.style.pointerEvents = pending ? 'none' : '';
+  if (pending) { dateInput.value = ''; _pdp.setValue(null); }
 }
 
 function closePlannerVersionModal() {

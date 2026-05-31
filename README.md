@@ -49,6 +49,8 @@
 - ✅ Project board with Kanban-style version columns
 - ✅ Create and manage projects with custom colors
 - ✅ Add versions with due dates or mark as pending
+- ✅ Due date picker is a fully custom dark-themed calendar — no native browser popup
+- ✅ Past dates are disabled in the due date picker — only today and future dates are selectable
 - ✅ Add tasks to versions with priority levels (High / Medium / Low)
 - ✅ Mark tasks as done with checkboxes
 - ✅ Versions lock the day **after** their due date passes (due date itself is always editable)
@@ -68,6 +70,8 @@
 - ✅ Task breakdown with share percentage per period
 - ✅ Export reports as .txt and .pdf for all three views
 - ✅ Navigate between weeks and months with prev/next controls
+- ✅ Date picker is a fully custom dark-themed calendar matching the app's design
+- ✅ App Open Time stat shown and synced to Firebase when signed in
 
 ### Notifications
 - ✅ Bell icon in the title bar with animated shake and red **!** badge when reminders exist
@@ -92,6 +96,7 @@
 - ✅ Real-time sync across multiple devices via Firestore listener
 - ✅ On sign-out: local data is cleared for security; sign back in to access data
 - ✅ Switching accounts loads that account's own separate data
+- ✅ App Open Time is included in the cloud sync payload and persisted per day
 
 ### System Tray & Taskbar
 - ✅ Minimize to system tray

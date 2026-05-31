@@ -68,7 +68,6 @@ function createWindow() {
 
   mainWindow.loadFile('index.html');
   // mainWindow.webContents.openDevTools(); // DEV-ONLY: comment out in production
-  mainWindow.webContents.openDevTools(); 
 
   mainWindow.once('ready-to-show', () => { mainWindow.show(); });
   mainWindow.on('close', (e) => { e.preventDefault(); mainWindow.hide(); });

@@ -831,15 +831,48 @@
               <option value="monthly">Monthly</option>
             </select>
             <!-- Daily: date picker -->
+            <!-- Custom dark date picker -->
             <div style="position:relative;display:inline-flex;align-items:center;" id="report-date-wrapper">
-              <input type="date" class="date-picker" id="report-date" style="padding-left:36px;" />
-              <svg onclick="document.getElementById('report-date').showPicker()"
-                style="position:absolute;left:10px;top:50%;transform:translateY(-50%);cursor:pointer;opacity:0.5;transition:opacity 0.15s,color 0.15s;pointer-events:all;color:var(--text-secondary);"
-                onmouseover="this.style.opacity='1';this.style.color='var(--accent)'" onmouseout="this.style.opacity='0.5';this.style.color='var(--text-secondary)'"
-                width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <rect x="1" y="3" width="14" height="12" rx="2" stroke="currentColor" stroke-width="1.3" />
-                <path d="M1 7h14M5 1v3M11 1v3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
-              </svg>
+              <!-- Hidden native input kept for value/change event compatibility -->
+              <input type="date" id="report-date" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;" />
+              <!-- Visible trigger button -->
+              <button id="report-date-btn" onclick="toggleCustomDatePicker()"
+                style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-card);
+                       border:1px solid var(--border);border-radius:8px;color:var(--text-primary);
+                       font-family:var(--font-ui);font-size:13px;cursor:pointer;transition:border-color .15s;
+                       white-space:nowrap;min-width:130px;">
+                <svg style="opacity:0.55;flex-shrink:0;color:var(--text-secondary)" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <rect x="1" y="3" width="14" height="12" rx="2" stroke="currentColor" stroke-width="1.3"/>
+                  <path d="M1 7h14M5 1v3M11 1v3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                </svg>
+                <span id="report-date-display">—</span>
+              </button>
+              <!-- Custom calendar dropdown -->
+              <div id="custom-date-picker" style="display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:9999;
+                   background:#13131a;border:1px solid #ffffff14;border-radius:12px;padding:14px;
+                   box-shadow:0 16px 48px #00000080;width:260px;user-select:none;">
+                <!-- Header: Month/Year + nav -->
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                  <button onclick="cdpNav(-1)" style="background:none;border:none;color:#8888aa;cursor:pointer;
+                          padding:4px 8px;border-radius:6px;font-size:16px;line-height:1;transition:color .15s;"
+                          onmouseover="this.style.color='#f0f0f5'" onmouseout="this.style.color='#8888aa'">‹</button>
+                  <span id="cdp-month-label" style="font-size:13px;font-weight:700;color:#f0f0f5;cursor:pointer;"
+                        onclick="cdpToggleYearMonth()"></span>
+                  <button onclick="cdpNav(1)" style="background:none;border:none;color:#8888aa;cursor:pointer;
+                          padding:4px 8px;border-radius:6px;font-size:16px;line-height:1;transition:color .15s;"
+                          onmouseover="this.style.color='#f0f0f5'" onmouseout="this.style.color='#8888aa'">›</button>
+                </div>
+                <!-- Day-of-week headers -->
+                <div id="cdp-dow" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px;"></div>
+                <!-- Day grid -->
+                <div id="cdp-days" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;"></div>
+                <!-- Footer -->
+                <div style="display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid #ffffff0a;">
+                  <button onclick="cdpToday()" style="background:none;border:none;color:#7c6af7;font-size:12px;font-weight:600;
+                          cursor:pointer;padding:4px 8px;border-radius:6px;font-family:var(--font-ui);transition:color .15s;margin-left:auto;"
+                          onmouseover="this.style.color='#9d8ff9'" onmouseout="this.style.color='#7c6af7'">Today</button>
+                </div>
+              </div>
             </div>
             <!-- Weekly: week nav -->
             <div id="report-week-nav" style="display:none;align-items:center;gap:6px;">
@@ -1249,16 +1282,38 @@
         <div class="form-group">
           <label>Due Date</label>
           <div style="display:flex;gap:10px;align-items:center">
-            <div style="position:relative;flex:1">
-              <input type="date" class="date-picker" id="planner-version-duedate"
-                style="width:100%;padding-left:36px" />
-              <svg onclick="document.getElementById('planner-version-duedate').showPicker()"
-                style="position:absolute;left:10px;top:50%;transform:translateY(-50%);cursor:pointer;opacity:0.6;transition:opacity 0.15s"
-                onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" width="16" height="16"
-                viewBox="0 0 16 16" fill="none">
-                <rect x="1" y="3" width="14" height="12" rx="2" stroke="currentColor" stroke-width="1.3" />
-                <path d="M1 7h14M5 1v3M11 1v3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
-              </svg>
+            <div style="position:relative;flex:1" id="planner-duedate-wrapper">
+              <!-- Hidden native input kept for value compatibility -->
+              <input type="date" id="planner-version-duedate" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;" />
+              <!-- Visible trigger button -->
+              <button id="planner-duedate-btn" onclick="togglePlannerDatePicker()"
+                style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-card);
+                       border:1px solid var(--border);border-radius:8px;color:var(--text-primary);
+                       font-family:var(--font-ui);font-size:13px;cursor:pointer;transition:border-color .15s;
+                       white-space:nowrap;width:100%;">
+                <svg style="opacity:0.55;flex-shrink:0;color:var(--text-secondary)" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <rect x="1" y="3" width="14" height="12" rx="2" stroke="currentColor" stroke-width="1.3"/>
+                  <path d="M1 7h14M5 1v3M11 1v3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                </svg>
+                <span id="planner-duedate-display">—</span>
+              </button>
+              <!-- Custom calendar dropdown -->
+              <div id="planner-custom-date-picker" style="display:none;position:fixed;top:0;left:0;z-index:99999;
+                   background:#13131a;border:1px solid #ffffff14;border-radius:12px;padding:14px;
+                   box-shadow:0 16px 48px #00000080;width:260px;user-select:none;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                  <button onclick="pdpNav(-1)" style="background:none;border:none;color:#8888aa;cursor:pointer;
+                          padding:4px 8px;border-radius:6px;font-size:16px;line-height:1;transition:color .15s;"
+                          onmouseover="this.style.color='#f0f0f5'" onmouseout="this.style.color='#8888aa'">‹</button>
+                  <span id="pdp-month-label" style="font-size:13px;font-weight:700;color:#f0f0f5;"></span>
+                  <button onclick="pdpNav(1)" style="background:none;border:none;color:#8888aa;cursor:pointer;
+                          padding:4px 8px;border-radius:6px;font-size:16px;line-height:1;transition:color .15s;"
+                          onmouseover="this.style.color='#f0f0f5'" onmouseout="this.style.color='#8888aa'">›</button>
+                </div>
+                <div id="pdp-dow" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px;"></div>
+                <div id="pdp-days" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;"></div>
+
+              </div>
             </div>
             <label
               style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);text-transform:none;letter-spacing:0;font-weight:500;cursor:pointer;white-space:nowrap">
