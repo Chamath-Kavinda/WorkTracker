@@ -1,5 +1,4 @@
 // ── WorkTracker App ──────────────────────────────────────────────────────────
-
 const api = window.electronAPI;
 
 // ── Firebase Auth ─────────────────────────────────────────────────────────────
@@ -2108,9 +2107,6 @@ function switchPage(page) {
 async function loadSettings() {
   const settings = await api.loadSettings();
   document.getElementById('toggle-startup').checked = settings.startWithWindows || false;
-
-  const info = await api.getPlatformInfo();
-  document.getElementById('platform-info').textContent = `${info.platform} — ${info.username}`;
 
   if (settings.country) {
     selectedCountry = settings.country;

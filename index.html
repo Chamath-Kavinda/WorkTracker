@@ -974,8 +974,10 @@
           <div class="settings-section">
             <h3>About</h3>
             <div class="about-info">
-              <div class="about-row"><span>Version</span><span>4.3.5</span></div>
-              <div class="about-row"><span>Platform</span><span id="platform-info">—</span></div>
+              <div class="about-row"><span>Name</span><span id="platform-name">—</span></div>
+              <div class="about-row"><span>Version</span><span id="platform-version">-</span></div>
+              <div class="about-row"><span>Developer</span><span id="platform-developer">—</span></div>
+              <div class="about-row"><span>Description</span><span id="platform-description">—</span></div>
             </div>
           </div>
         </div>
@@ -1318,6 +1320,14 @@
   </div>
 
   <script src="app.js"></script>
+  <script>
+    window.electronAPI.getAppInfo().then(info => {
+      document.getElementById('platform-name').textContent = info.name;
+      document.getElementById('platform-version').textContent = info.version;
+      document.getElementById('platform-developer').textContent = info.author;
+      document.getElementById('platform-description').textContent = info.description;
+    });
+  </script>
 </body>
 
 </html>

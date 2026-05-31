@@ -438,3 +438,13 @@ ipcMain.handle('set-tray-timer-enabled', (_, enabled) => {
   }
   return true;
 });
+
+ipcMain.handle('get-app-info', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+  return {
+    version: app.getVersion(),
+    name: pkg.productName || pkg.name,
+    description: pkg.description,
+    author: typeof pkg.author === 'object' ? pkg.author.name : pkg.author,
+  };
+});

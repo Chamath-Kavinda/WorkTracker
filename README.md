@@ -13,7 +13,7 @@
    npm install
    npm run build
    ```
-3. Find your installer at: `dist/WorkTracker Setup 1.0.0.exe`
+3. Find your installer at: `dist/WorkTracker Setup 5.2.1.exe`
 
 ## What you get
 - `.exe` NSIS installer for Windows 10/11
@@ -31,9 +31,11 @@
 - ✅ Tasks grouped by date on the Tasks page (newest first)
 - ✅ Filter tasks by status (All / Active / Paused / Completed)
 - ✅ Filter tasks by category (Work / Meeting / Design / Development / Research / Admin / Other)
+- ✅ Search tasks by name on the Tasks page
 - ✅ Past-day tasks are automatically locked — cannot be started, paused, or stopped
 - ✅ Tasks left running overnight are auto-completed at midnight with accurate session time
 - ✅ Delete tasks with confirmation popup (today's tasks only)
+- ✅ Edit task name, category, and notes inline
 
 ### Planner
 - ✅ Project board with Kanban-style version columns
@@ -47,6 +49,13 @@
 - ✅ Projects visible on Dashboard for quick access
 - ✅ Click any Dashboard project to open its board directly
 
+### Report
+- ✅ Daily, Weekly, and Monthly report views
+- ✅ Day-by-day bar charts for weekly and monthly views
+- ✅ Task breakdown with share percentage per period
+- ✅ Export reports as .txt and .pdf for all three views
+- ✅ Navigate between weeks and months with prev/next controls
+
 ### Notifications
 - ✅ Bell icon in the title bar with animated shake and red **!** badge when reminders exist
 - ✅ Bell animates every 5 seconds until all notifications are read
@@ -57,8 +66,10 @@
   - On the due date — always, regardless of task completion
 - ✅ Unread notifications shown in **bold**; read notifications are dimmed
 - ✅ First 3 notifications shown inline; remaining hidden behind "Show more"
+- ✅ Full notifications modal with tab filters (All / Unread / Read) and project filter
 - ✅ Mark individual notifications as read or mark all at once
 - ✅ Bell badge and animation clear automatically once all are read
+- ✅ Read notification state persisted across restarts
 
 ### Cloud Sync & Accounts
 - ✅ Google Sign-In via system browser (no embedded browser)
@@ -69,12 +80,21 @@
 - ✅ On sign-out: local data is cleared for security; sign back in to access data
 - ✅ Switching accounts loads that account's own separate data
 
+### System Tray & Taskbar
+- ✅ Minimize to system tray
+- ✅ Double-click tray icon to restore window
+- ✅ Right-click tray for Open / Quit menu
+- ✅ **Live task overlay widget** — floating draggable panel showing active task name and elapsed time (like DU Meter)
+- ✅ Overlay appears automatically when a timer starts and hides when paused or stopped
+- ✅ Overlay toggle in Settings (default: off)
+- ✅ Taskbar title updates live with active task name and time while tracking
+
 ### System
 - ✅ Run at Windows startup (Settings toggle)
-- ✅ Minimize to system tray
 - ✅ All data stored locally (AppData/Roaming/worktracker) when offline
 - ✅ Country / Region setting drives timezone for all date calculations (no hardcoding)
 - ✅ Supported timezones: Sri Lanka, United States, United Kingdom, India, Australia, Singapore, Germany, France, Japan, Canada
+- ✅ App version, name, and author shown in Settings pulled from package.json automatically
 
 ### Calendar
 - ✅ Calendar view with work session history
@@ -97,7 +117,7 @@ When signed in to a Google account, all data is synced to Firebase Firestore and
 
 ## Export Folders
 Exports are saved to subfolders inside `%AppData%\worktracker\exports\`:
-- `Reports\` — Daily work time reports (.txt and .pdf)
+- `Reports\` — Daily, weekly, and monthly work time reports (.txt and .pdf)
 - `ProjectPlans\` — Planner project exports (.txt and .pdf)
 
 Use the **Open Exports Folder** button in the Report or Planner page to open the folder directly.
@@ -111,7 +131,3 @@ https://github.com/Dilshan-H/srilanka-holidays
 - Data sourced from official Sri Lankan government gazette
 - Updated every year by the open-source maintainer
 - Cached locally after first load (one fetch per year)
-
-## Optional: Firebase
-Sign in with your Google account in the title bar or Settings page to enable cloud sync.  
-To use your own Firebase project, enter your API Key, Project ID, and App ID in the Settings page.

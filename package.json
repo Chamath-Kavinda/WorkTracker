@@ -1,8 +1,8 @@
 {
   "name": "worktracker",
-  "version": "4.3.5",
+  "version": "5.4.1",
   "description": "Work Time Tracker - Track your tasks with precision",
-  "author": "WorkTracker",
+  "author": "Chama Bro",
   "main": "main.js",
   "scripts": {
     "start": "electron .",

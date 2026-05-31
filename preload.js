@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppStartTime: () => ipcRenderer.invoke('get-app-start-time'),
   setActiveTimer: (data) => ipcRenderer.invoke('set-active-timer', data),
   setTrayTimerEnabled: (enabled) => ipcRenderer.invoke('set-tray-timer-enabled', enabled),
-
+  getAppInfo: () => ipcRenderer.invoke('get-app-info'),
   // Google OAuth via main-process BrowserWindow
   googleSignIn: () => ipcRenderer.invoke('google-sign-in'),
 });
