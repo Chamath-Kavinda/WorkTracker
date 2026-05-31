@@ -3159,7 +3159,7 @@ function openProjectBoard(projectId) {
   if (!proj) return;
 
   document.getElementById('planner-page-title').textContent = proj.name;
-  document.getElementById('planner-page-subtitle').textContent = proj.desc || 'Project board';
+  document.getElementById('planner-page-subtitle').textContent = 'Project board';
   document.getElementById('btn-planner-new-label').textContent = 'New Version';
   document.getElementById('btn-planner-back').style.display = '';
   document.getElementById('planner-projects-view').style.display = 'none';
@@ -3173,7 +3173,9 @@ function renderBoard() {
   const board = document.getElementById('planner-board');
   board.innerHTML = '';
 
-  const versions = plannerState.versions.filter(v => v.projectId === projectId);
+  const versions = plannerState.versions
+    .filter(v => v.projectId === projectId)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
   if (versions.length === 0) {
     board.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:80px 20px;color:var(--text-muted);text-align:center;min-width:100%">
@@ -3183,7 +3185,7 @@ function renderBoard() {
     </div>`;
   } else {
     versions.forEach(ver => {
-      const tasks = plannerState.plannerTasks.filter(t => t.versionId === ver.id);
+      const tasks = plannerState.plannerTasks.filter(t => t.versionId === ver.id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       const locked = isVersionLocked(ver);
       const proj = plannerState.projects.find(p => p.id === projectId);
       const verColor = proj?.color || PLANNER_COLORS[0];
@@ -3192,12 +3194,23 @@ function renderBoard() {
       const allDone = tasks.length > 0 && tasks.every(t => t.done);
       col.className = `planner-version-col${locked ? ' locked' : ''}${allDone ? ' all-done' : ''}`;
       col.style.setProperty('--ver-color', verColor);
+      col.dataset.verId = ver.id;
 
       const lockIcon = locked ? `<span class="version-locked-badge">🔒 Locked</span>` : '';
       const allDoneBadge = allDone ? `<span class="all-done-badge">✅ All Done</span>` : '';
 
       col.innerHTML = `
         <div class="version-col-header">
+          <div class="version-drag-handle" title="Drag to reorder" draggable="true">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <circle cx="4" cy="2.5" r="1" fill="currentColor"/>
+              <circle cx="8" cy="2.5" r="1" fill="currentColor"/>
+              <circle cx="4" cy="6" r="1" fill="currentColor"/>
+              <circle cx="8" cy="6" r="1" fill="currentColor"/>
+              <circle cx="4" cy="9.5" r="1" fill="currentColor"/>
+              <circle cx="8" cy="9.5" r="1" fill="currentColor"/>
+            </svg>
+          </div>
           <div class="version-col-actions">
             ${!locked ? `<button class="version-action-btn" title="Edit version" data-action="edit-ver">
               <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M7 2l2 2-5 5H2V7l5-5z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>
@@ -3233,9 +3246,23 @@ function renderBoard() {
         tasks.forEach(task => {
           const item = document.createElement('div');
           item.className = `planner-task-item${locked ? ' locked' : ''}${task.done ? ' done' : ''}`;
+          item.dataset.taskId = task.id;
+          if (!locked) item.draggable = true;
+
           item.innerHTML = `
           <div class="planner-task-item-actions">
-            ${!locked ? `<button class="task-mini-btn" title="Edit" data-action="edit-task" data-task-id="${task.id}">
+            ${!locked ? `
+            <div class="drag-handle" title="Drag to reorder">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                <circle cx="3" cy="2.5" r="1" fill="currentColor"/>
+                <circle cx="7" cy="2.5" r="1" fill="currentColor"/>
+                <circle cx="3" cy="5" r="1" fill="currentColor"/>
+                <circle cx="7" cy="5" r="1" fill="currentColor"/>
+                <circle cx="3" cy="7.5" r="1" fill="currentColor"/>
+                <circle cx="7" cy="7.5" r="1" fill="currentColor"/>
+              </svg>
+            </div>
+            <button class="task-mini-btn" title="Edit" data-action="edit-task" data-task-id="${task.id}">
               <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M6.5 1.5l2 2-5 5H1.5v-2l5-5z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>
             </button>` : ''}
             <button class="task-mini-btn danger" title="Delete" data-action="delete-task" data-task-id="${task.id}">
@@ -3271,7 +3298,9 @@ function renderBoard() {
           });
           taskList.appendChild(item);
         });
+        initTaskDrag(taskList, ver.id, locked);
       }
+      initColumnDrop(taskList, ver.id, locked);
 
       // Version actions
       col.querySelector('[data-action="edit-ver"]')?.addEventListener('click', () => openVersionModal(ver.id));
@@ -3296,6 +3325,203 @@ function renderBoard() {
   addCol.innerHTML = `<svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3v14M3 10h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>New Version`;
   addCol.addEventListener('click', () => openVersionModal(null));
   board.appendChild(addCol);
+
+  // Enable header-only drag to reorder versions
+  initVersionDrag(board);
+}
+
+// ── Version Column Drag-to-Reorder ───────────────────────────────────────────
+function initVersionDrag(board) {
+  let _verDragSrc = null;
+
+  board.querySelectorAll('.planner-version-col').forEach(col => {
+    const handle = col.querySelector('.version-drag-handle');
+    if (!handle) return;
+
+    // The handle itself is draggable=true (set in HTML).
+    // Drag events on the handle bubble up — we listen on the handle for dragstart
+    // so it never conflicts with task-item drags elsewhere in the column.
+    handle.addEventListener('dragstart', (e) => {
+      _verDragSrc = col;
+      col.classList.add('ver-dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/x-ver-id', col.dataset.verId || '');
+      e.stopPropagation();
+    });
+
+    handle.addEventListener('dragend', () => {
+      col.classList.remove('ver-dragging');
+      board.querySelectorAll('.planner-version-col').forEach(c => c.classList.remove('ver-drag-over'));
+      _verDragSrc = null;
+    });
+
+    // Drop targets: every other version column
+    col.addEventListener('dragover', (e) => {
+      if (!_verDragSrc || col === _verDragSrc) return;
+      if (!e.dataTransfer.types.includes('text/x-ver-id')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      board.querySelectorAll('.planner-version-col').forEach(c => c.classList.remove('ver-drag-over'));
+      col.classList.add('ver-drag-over');
+    });
+
+    col.addEventListener('dragleave', (e) => {
+      if (!col.contains(e.relatedTarget)) col.classList.remove('ver-drag-over');
+    });
+
+    col.addEventListener('drop', (e) => {
+      if (!e.dataTransfer.types.includes('text/x-ver-id')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      col.classList.remove('ver-drag-over');
+      if (!_verDragSrc || col === _verDragSrc) return;
+
+      const cols = [...board.querySelectorAll('.planner-version-col:not(.planner-add-version-col)')];
+      const srcIdx = cols.indexOf(_verDragSrc);
+      const tgtIdx = cols.indexOf(col);
+      if (srcIdx === -1 || tgtIdx === -1) return;
+
+      if (srcIdx < tgtIdx) board.insertBefore(_verDragSrc, col.nextSibling);
+      else board.insertBefore(_verDragSrc, col);
+
+      const newCols = [...board.querySelectorAll('.planner-version-col:not(.planner-add-version-col)')];
+      newCols.forEach((c, idx) => {
+        const ver = plannerState.versions.find(v => v.id === c.dataset.verId);
+        if (ver) ver.order = idx;
+      });
+
+      savePlannerData();
+    });
+  });
+}
+
+// ── Drag & Drop ─────────────────────────────────────────────────────────────
+// Board-level drag state shared across all version columns
+const _boardDrag = { srcTaskId: null, srcVersionId: null };
+
+function initTaskDrag(taskList, versionId, locked) {
+  if (locked) return;
+
+  taskList.querySelectorAll('.planner-task-item[draggable="true"]').forEach(item => {
+    item.addEventListener('dragstart', (e) => {
+      _boardDrag.srcTaskId = item.dataset.taskId;
+      _boardDrag.srcVersionId = versionId;
+      item.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', item.dataset.taskId);
+    });
+
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      // Clean up all drag-over highlights across the entire board
+      document.querySelectorAll('.planner-task-item.drag-over, .version-tasks-list.drag-over-col').forEach(el => {
+        el.classList.remove('drag-over', 'drag-over-col');
+      });
+      _boardDrag.srcTaskId = null;
+      _boardDrag.srcVersionId = null;
+    });
+
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const srcId = _boardDrag.srcTaskId;
+      if (!srcId || item.dataset.taskId === srcId) return;
+      // Clear other highlights in the same list only
+      taskList.querySelectorAll('.planner-task-item').forEach(i => i.classList.remove('drag-over'));
+      item.classList.add('drag-over');
+    });
+
+    item.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation(); // prevent column drop handler from also firing
+      const srcTaskId = _boardDrag.srcTaskId;
+      if (!srcTaskId || item.dataset.taskId === srcTaskId) return;
+
+      const task = plannerState.plannerTasks.find(t => t.id === srcTaskId);
+      if (!task) return;
+
+      const isCrossVersion = task.versionId !== versionId;
+
+      if (isCrossVersion) {
+        // Move task to this version
+        task.versionId = versionId;
+        // Place it before the hovered item in order
+        const targetTask = plannerState.plannerTasks.find(t => t.id === item.dataset.taskId);
+        const targetOrder = targetTask?.order ?? 0;
+        // Shift existing tasks in target version down to make room
+        plannerState.plannerTasks
+          .filter(t => t.versionId === versionId && t.id !== srcTaskId && (t.order ?? 0) >= targetOrder)
+          .forEach(t => t.order = (t.order ?? 0) + 1);
+        task.order = targetOrder;
+      } else {
+        // Same-version reorder via DOM
+        const items = [...taskList.querySelectorAll('.planner-task-item[draggable="true"]')];
+        const srcEl = items.find(el => el.dataset.taskId === srcTaskId);
+        if (!srcEl) return;
+        const srcIdx = items.indexOf(srcEl);
+        const tgtIdx = items.indexOf(item);
+        if (srcIdx < tgtIdx) taskList.insertBefore(srcEl, item.nextSibling);
+        else taskList.insertBefore(srcEl, item);
+        // Persist new order
+        [...taskList.querySelectorAll('.planner-task-item[draggable="true"]')].forEach((el, idx) => {
+          const t = plannerState.plannerTasks.find(t => t.id === el.dataset.taskId);
+          if (t) t.order = idx;
+        });
+      }
+
+      item.classList.remove('drag-over');
+      savePlannerData();
+      if (isCrossVersion) renderBoard(); // re-render so task appears in new column
+    });
+  });
+}
+
+// Wire up a version column's task list as a cross-version drop target
+function initColumnDrop(taskList, versionId, locked) {
+  if (locked) {
+    // Locked column: block any drop visually
+    taskList.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'none';
+    });
+    return;
+  }
+
+  taskList.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (_boardDrag.srcVersionId && _boardDrag.srcVersionId !== versionId) {
+      taskList.classList.add('drag-over-col');
+    }
+  });
+
+  taskList.addEventListener('dragleave', (e) => {
+    // Only remove highlight when leaving the list itself (not entering a child)
+    if (!taskList.contains(e.relatedTarget)) {
+      taskList.classList.remove('drag-over-col');
+    }
+  });
+
+  taskList.addEventListener('drop', (e) => {
+    e.preventDefault();
+    taskList.classList.remove('drag-over-col');
+
+    const srcTaskId = _boardDrag.srcTaskId;
+    if (!srcTaskId) return;
+    const task = plannerState.plannerTasks.find(t => t.id === srcTaskId);
+    if (!task || task.versionId === versionId) return; // same-version handled by item drop
+
+    // Move task to this version, append at the end
+    task.versionId = versionId;
+    const maxOrder = plannerState.plannerTasks
+      .filter(t => t.versionId === versionId && t.id !== srcTaskId)
+      .reduce((max, t) => Math.max(max, t.order ?? 0), -1);
+    task.order = maxOrder + 1;
+
+    savePlannerData();
+    renderBoard();
+  });
 }
 
 // ── Project Modal ─────────────────────────────────────────────────────────────
@@ -3436,7 +3662,8 @@ function savePlannerTask() {
       id: genId(),
       versionId: plannerState.editingVersionTaskTarget,
       name, notes, priority,
-      done: false,           // ← add this
+      done: false,
+      order: plannerState.plannerTasks.filter(t => t.versionId === plannerState.editingVersionTaskTarget).length,
       createdAt: new Date().toISOString(),
     });
     showNotif('Task added', 'success');
@@ -3465,9 +3692,28 @@ function showProjExportMenu(projId, anchor) {
 async function exportProjectReport(projId, format) {
   const proj = plannerState.projects.find(p => p.id === projId);
   if (!proj) return;
-  const versions = plannerState.versions.filter(v => v.projectId === projId);
+  const versions = plannerState.versions
+    .filter(v => v.projectId === projId)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const dateStr = todayStr();
   const safeName = proj.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+  // Helper: get version status label for PDF/txt
+  const getVerStatus = (ver) => {
+    const tasks = plannerState.plannerTasks.filter(t => t.versionId === ver.id);
+    const allDone = tasks.length > 0 && tasks.every(t => t.done);
+    if (ver.pending || !ver.dueDate) return { label: 'Pending', released: false, failed: false, locked: false };
+    const due = new Date(ver.dueDate + 'T00:00:00');
+    const today = new Date(); today.setHours(0, 0, 0, 0); due.setHours(0, 0, 0, 0);
+    const diff = Math.round((due - today) / 86400000);
+    if (diff < 0) {
+      return allDone
+        ? { label: 'Released', released: true, failed: false, locked: true }
+        : { label: 'Failed to Release', released: false, failed: true, locked: true };
+    }
+    if (diff === 0) return { label: 'Due Today', released: false, failed: false, locked: false };
+    return { label: diff === 1 ? '1d left' : diff + 'd left', released: false, failed: false, locked: false };
+  };
 
   if (format === 'txt') {
     let txt = `PROJECT REPORT: ${proj.name}\n`;
@@ -3476,12 +3722,13 @@ async function exportProjectReport(projId, format) {
     txt += `Generated: ${new Date().toLocaleString()}\n`;
     txt += `Versions: ${versions.length}\n\n`;
     versions.forEach(ver => {
-      const tasks = plannerState.plannerTasks.filter(t => t.versionId === ver.id);
+      const tasks = plannerState.plannerTasks.filter(t => t.versionId === ver.id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       const done = tasks.filter(t => t.done).length;
+      const st = getVerStatus(ver);
       txt += `VERSION: ${ver.name}\n${'-'.repeat(40)}\n`;
       if (ver.desc) txt += `  Description: ${ver.desc}\n`;
       txt += `  Due: ${ver.pending ? 'Pending' : (ver.dueDate || 'N/A')}\n`;
-      txt += `  Status: ${ver.pending ? 'Pending' : (isVersionLocked(ver) ? 'Locked (Past Due)' : 'Active')}\n`;
+      txt += `  Status: ${st.label}\n`;
       txt += `  Tasks: ${tasks.length} total, ${done} done, ${tasks.length - done} remaining\n\n`;
       tasks.forEach((t, i) => {
         txt += `  ${i + 1}. [${t.done ? 'x' : ' '}] ${t.name}`;
@@ -3583,9 +3830,9 @@ async function exportProjectReport(projId, format) {
     if (allProjDone) {
       doc.setFillColor(220, 248, 236);
     } else {
-      const sbR = Math.round(rgb.r * 0.12 + 255 * 0.88);
-      const sbG = Math.round(rgb.g * 0.12 + 255 * 0.88);
-      const sbB = Math.round(rgb.b * 0.12 + 255 * 0.88);
+      const sbR = Math.round(rgb.r * 0.35 + 255 * 0.65);
+      const sbG = Math.round(rgb.g * 0.35 + 255 * 0.65);
+      const sbB = Math.round(rgb.b * 0.35 + 255 * 0.65);
       doc.setFillColor(sbR, sbG, sbB);
     }
     doc.roundedRect(margin, y, pageW - margin * 2, 8, 2, 2, 'F');
@@ -3603,18 +3850,27 @@ async function exportProjectReport(projId, format) {
 
     // Versions
     versions.forEach(ver => {
-      const tasks = plannerState.plannerTasks.filter(t => t.versionId === ver.id);
+      const tasks = plannerState.plannerTasks.filter(t => t.versionId === ver.id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       const done = tasks.filter(t => t.done).length;
       const allDone = tasks.length > 0 && done === tasks.length;
-      const verRgb = allDone ? green : rgb;
+      const st = getVerStatus(ver);
+
+      // Header bar color: green=released, red=failed, project color=everything else
+      const released = { r: 16, g: 185, b: 129 };  // green
+      const failed = { r: 220, g: 50, b: 50 };  // red
+      const verRgb = st.released ? released : st.failed ? failed : (allDone ? green : rgb);
       const rowH = 5.5;
 
       checkPage(22);
 
-      // Measure right badge text first so version name can be truncated to avoid overlap
-      doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
-      const dueTxt = ver.pending ? 'Pending' : (ver.dueDate || 'N/A');
-      const rightLabel = allDone ? 'FINISHED' : ('Due: ' + dueTxt + '   ' + done + '/' + tasks.length + ' done');
+      // Build right-side badge: Released 🚀 / Failed 💥 / FINISHED / Due: ...
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+      let rightLabel;
+      if (st.released) rightLabel = '>> RELEASED <<';
+      else if (st.failed) rightLabel = 'FAILED TO RELEASE';
+      else if (allDone) rightLabel = 'FINISHED';
+      else rightLabel = 'Due: ' + (ver.pending ? 'Pending' : (ver.dueDate || 'N/A')) + '   ' + done + '/' + tasks.length + ' done';
+
       const rightLabelW = doc.getTextWidth(rightLabel);
       const rightX = pageW - margin - 3.5;
 
@@ -3623,17 +3879,21 @@ async function exportProjectReport(projId, format) {
       doc.roundedRect(margin, y, pageW - margin * 2, 8, 2, 2, 'F');
       doc.setTextColor(255, 255, 255);
 
-      // Draw checkmark before FINISHED
-      if (allDone) {
+      // Icon before the right label
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+      if (allDone && !st.released) {
         drawCheck(rightX - rightLabelW - 3, y + 3.9, { r: 255, g: 255, b: 255 });
       }
-      doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold');
       doc.text(rightLabel, rightX, y + 5, { align: 'right' });
 
+      // Also show 🔒 Locked badge text next to version name if locked but not released/failed
+      const lockedSuffix = (st.locked && !st.released && !st.failed) ? '  [LOCKED]' : '';
+
       // Version name truncated to not overlap right badge
-      const maxNameW = pageW - margin * 2 - rightLabelW - (allDone ? 12 : 8);
+      const maxNameW = pageW - margin * 2 - rightLabelW - ((allDone || st.released || st.failed) ? 12 : 8);
       doc.setFontSize(10); doc.setFont('helvetica', 'bold');
-      const verNameStr = doc.splitTextToSize(ver.name, maxNameW)[0];
+      const verNameStr = doc.splitTextToSize(ver.name + lockedSuffix, maxNameW)[0];
       doc.text(verNameStr, margin + 4, y + 5);
 
       y += 14;

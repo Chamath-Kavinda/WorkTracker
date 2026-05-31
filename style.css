@@ -1162,3 +1162,75 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 .main-content .page.active {
   flex: 1;
 }
+.drag-handle {
+  cursor: grab;
+  color: #ffffff30;
+  padding: 2px 3px;
+  border-radius: 3px;
+  transition: color .15s;
+  display: flex;
+  align-items: center;
+}
+.drag-handle:hover { color: #ffffff70; }
+.drag-handle:active { cursor: grabbing; }
+
+.planner-task-item.dragging {
+  opacity: 0.4;
+  border: 1px dashed #7c6af7;
+}
+
+.planner-task-item.drag-over {
+  border-color: #7c6af7;
+  background: #7c6af710;
+  transform: scale(1.01);
+}
+
+/* Cross-version drop target highlight */
+.version-tasks-list.drag-over-col {
+  background: #7c6af708;
+  border-radius: 8px;
+  outline: 2px dashed #7c6af780;
+  outline-offset: -2px;
+  min-height: 48px;
+  transition: background 0.15s, outline 0.15s;
+}
+
+/* Locked columns show a no-drop cursor when dragging over */
+.planner-version-col.locked .version-tasks-list {
+  cursor: not-allowed;
+}
+
+/* Version column drag-to-reorder */
+.version-drag-handle {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--text-muted);
+  opacity: 0;
+  cursor: grab;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: opacity 0.15s;
+  line-height: 0;
+}
+.version-col-header:hover .version-drag-handle {
+  opacity: 0.5;
+}
+.version-drag-handle:hover {
+  opacity: 1 !important;
+  background: #ffffff10;
+}
+.version-drag-handle:active {
+  cursor: grabbing;
+}
+.planner-version-col.ver-dragging {
+  opacity: 0.45;
+  border: 1px dashed #7c6af7;
+}
+.planner-version-col.ver-drag-over {
+  border-color: #7c6af7;
+  box-shadow: 0 0 0 2px #7c6af740;
+  transform: scale(1.01);
+  transition: transform 0.1s, box-shadow 0.1s;
+}
