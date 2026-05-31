@@ -448,6 +448,7 @@ let state = {
   activeSessionStart: null,
   currentFilter: 'all',
   currentCategoryFilter: 'all',
+  currentSearch: '',
   currentPage: 'dashboard',
   timerInterval: null,
 };
@@ -511,7 +512,10 @@ function formatDurationShort(ms) {
 
 function formatTime(iso) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleTimeString([], {
+    hour: '2-digit', minute: '2-digit',
+    timeZone: getUserTimezone(),
+  });
 }
 
 function formatDate(iso) {
@@ -886,10 +890,9 @@ function renderDashboard() {
       <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="20" stroke="#ffffff15" stroke-width="2"/><path d="M24 16v8l4 4" stroke="#ffffff20" stroke-width="2" stroke-linecap="round"/></svg>
       <p>No tasks today. Add one to start tracking!</p>
     </div>`;
-    return;
+  } else {
+    todayTasks.forEach(task => list.appendChild(createTaskCard(task, { showDelete: false })));
   }
-
-  todayTasks.forEach(task => list.appendChild(createTaskCard(task, { showDelete: false })));
 
   renderDashboardProjects();
 }
@@ -976,10 +979,16 @@ function renderTasksPage() {
     tasks = tasks.filter(t => (t.category || 'other') === state.currentCategoryFilter);
   }
 
+  // ── Apply search filter ───────────────────────────────────────────────────
+  const searchQuery = state.currentSearch.trim().toLowerCase();
+  if (searchQuery) {
+    tasks = tasks.filter(t => t.name.toLowerCase().includes(searchQuery));
+  }
+
   if (tasks.length === 0) {
     list.innerHTML = `<div class="empty-state">
       <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="20" stroke="#ffffff15" stroke-width="2"/><path d="M16 24h16M16 17h16M16 31h10" stroke="#ffffff20" stroke-width="2" stroke-linecap="round"/></svg>
-      <p>No tasks found.</p>
+      <p>${searchQuery ? `No tasks matching "${state.currentSearch}"` : 'No tasks found.'}</p>
     </div>`;
     return;
   }
@@ -2399,7 +2408,6 @@ async function _exportReportWeekly(format) {
   const taskSummary = aggregateTasksAcrossDates(dates);
   const grandTotal = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
   const workedDays = Object.values(dayMap).filter(v => v.totalMs > 0).length;
-  const totalSess = Object.values(dayMap).reduce((a, v) => a + v.sessionCount, 0);
   const dailyAvg = workedDays > 0 ? Math.round(grandTotal / workedDays) : 0;
 
   y = _pdfSummaryBox(doc, y,
@@ -2550,7 +2558,6 @@ async function _exportReportMonthly(format) {
   const taskSummary = aggregateTasksAcrossDates(dates);
   const grandTotal = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
   const workedDays = Object.values(dayMap).filter(v => v.totalMs > 0).length;
-  const totalSess = Object.values(dayMap).reduce((a, v) => a + v.sessionCount, 0);
   const dailyAvg = workedDays > 0 ? Math.round(grandTotal / workedDays) : 0;
 
   y = _pdfSummaryBox(doc, y,
@@ -2809,8 +2816,7 @@ async function renderCalendar() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
-  await initFirebase();   // sets up auth listener first
-  await loadData();
+  await initFirebase();   // sets up auth listener, loads & applies state
   await loadSettings();
 
   // Set today's date in report
@@ -2892,6 +2898,35 @@ async function init() {
       renderTasksPage();
     });
   });
+
+  // Search input
+  const searchInput = document.getElementById('task-search-input');
+  const searchClear = document.getElementById('task-search-clear');
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      state.currentSearch = searchInput.value;
+      if (searchClear) searchClear.style.display = searchInput.value ? '' : 'none';
+      renderTasksPage();
+    });
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        searchInput.value = '';
+        state.currentSearch = '';
+        if (searchClear) searchClear.style.display = 'none';
+        renderTasksPage();
+        searchInput.blur();
+      }
+    });
+  }
+  if (searchClear) {
+    searchClear.addEventListener('click', () => {
+      if (searchInput) searchInput.value = '';
+      state.currentSearch = '';
+      searchClear.style.display = 'none';
+      renderTasksPage();
+      if (searchInput) searchInput.focus();
+    });
+  }
 
   // Calendar nav
   document.getElementById('cal-prev').addEventListener('click', () => {
@@ -3013,11 +3048,6 @@ let plannerState = {
 };
 
 // ── Planner Persistence ───────────────────────────────────────────────────────
-async function loadPlannerData() {
-  // No-op: planner data is loaded by the unified loadData() / initFirebase() sync flow
-  // plannerState is already populated via _applyState() — do not read from local store directly
-}
-
 async function savePlannerData() {
   // Delegate to the unified saveData() which handles cloud vs local correctly
   await saveData();

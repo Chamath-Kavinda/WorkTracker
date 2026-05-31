@@ -186,7 +186,6 @@ ipcMain.handle('google-sign-in', async () => {
     const server = http.createServer();
     _authServer = server;
     server.listen(AUTH_PORT, '127.0.0.1', () => {
-      const port = AUTH_PORT;
 
       const AUTH_URL =
         `https://accounts.google.com/o/oauth2/v2/auth` +
@@ -205,7 +204,7 @@ ipcMain.handle('google-sign-in', async () => {
       }, 5 * 60 * 1000);
 
       server.on('request', (req, res) => {
-        const reqUrl = new URL(req.url, `http://localhost:${port}`);
+        const reqUrl = new URL(req.url, `http://localhost:${AUTH_PORT}`);
 
         // Google sends tokens in the hash fragment which the browser doesn't
         // forward to the server. We serve a tiny HTML page that reads the hash
@@ -295,7 +294,7 @@ ipcMain.handle('google-sign-in', async () => {
             <p  id="msg">Please wait a moment</p>
 
             <script>
-              const TOKEN_URL = 'http://localhost:${port}/token';
+              const TOKEN_URL = 'http://localhost:${AUTH_PORT}/token';
               const params = new URLSearchParams(
                 location.hash.replace('#', '') || location.search.replace('?', '')
               );
@@ -394,14 +393,13 @@ ipcMain.handle('set-active-timer', (_, { taskName, startedAt }) => {
     const hms = h > 0
       ? `${h}h ${String(m).padStart(2, '0')}m`
       : `${m}m ${String(s).padStart(2, '0')}s`;
-    const label = taskName;
 
-    tray.setToolTip(`▶ ${label} — ${hms}`);
-    mainWindow.setTitle(`WorkTracker ▶ ${label} ${hms}`);
+    tray.setToolTip(`▶ ${taskName} — ${hms}`);
+    mainWindow.setTitle(`WorkTracker ▶ ${taskName} ${hms}`);
 
     if (overlayWindow && !overlayWindow.isDestroyed()) {
       overlayWindow.webContents.executeJavaScript(`
-        document.getElementById('task').textContent = ${JSON.stringify('▶ ' + label)};
+        document.getElementById('task').textContent = ${JSON.stringify('▶ ' + taskName)};
         document.getElementById('time').textContent = ${JSON.stringify(hms)};
       `).catch(() => { });
     }
@@ -412,7 +410,7 @@ ipcMain.handle('set-active-timer', (_, { taskName, startedAt }) => {
   return true;
 });
 
-let _trayTimerEnabled = true; // default on, can be toggled via settings
+let _trayTimerEnabled = false; // default off, toggled via settings
 ipcMain.handle('set-tray-timer-enabled', (_, enabled) => {
   _trayTimerEnabled = enabled;
   if (!enabled) {
