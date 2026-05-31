@@ -1,0 +1,33 @@
+WorkTracker - End User License Agreement
+Version 6.2.0
+Copyright (c) 2024 Chama Bro. All rights reserved.
+
+BY INSTALLING OR USING THIS SOFTWARE YOU AGREE TO THE FOLLOWING TERMS.
+
+1. LICENSE GRANT
+   Chama Bro grants you a personal, non-exclusive, non-transferable license to
+   install and use WorkTracker on any Windows computer you own or control.
+
+2. RESTRICTIONS
+   You may not:
+   (a) Sell, sublicense, or redistribute the software or any portion of it.
+   (b) Reverse-engineer, decompile, or disassemble the software.
+   (c) Remove or alter any proprietary notices or labels.
+
+3. DATA & PRIVACY
+   WorkTracker stores your work-session data locally on your machine
+   (AppData\Roaming\worktracker). If you choose to sign in with a Google
+   account, your data is synced to Google Firebase Firestore under your
+   Google account. No data is sold or shared with third parties.
+
+4. DISCLAIMER OF WARRANTIES
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+5. LIMITATION OF LIABILITY
+   IN NO EVENT SHALL CHAMA BRO BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+   SPECIAL, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR RELATED TO YOUR USE
+   OF THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+If you do not agree to these terms, do not install or use WorkTracker.

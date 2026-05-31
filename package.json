@@ -1,12 +1,12 @@
 {
   "name": "worktracker",
-  "version": "6.2.0",
+  "version": "6.3.0",
   "description": "Work Time Tracker - Track your tasks with precision",
   "author": "Chama Bro",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win portable --x64",
+    "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win nsis --x64",
     "build-portable": "electron-builder --win portable"
   },
   "build": {
@@ -15,6 +15,14 @@
     "directories": {
       "output": "dist"
     },
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!*.nsi",
+      "!*.bat",
+      "!*.md",
+      "!node_modules/.cache/**"
+    ],
     "win": {
       "target": [
         {
@@ -28,10 +36,24 @@
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": true,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
+      "allowElevation": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "WorkTracker"
+      "shortcutName": "WorkTracker",
+      "menuCategory": "WorkTracker",
+      "include": "installer.nsi",
+      "language": "1033",
+      "license": "LICENSE.txt",
+      "artifactName": "WorkTracker Setup ${version}.exe",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "warningsAsErrors": false,
+      "uninstallDisplayName": "WorkTracker"
     },
     "extraResources": [],
     "protocols": [

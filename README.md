@@ -13,7 +13,7 @@
    npm install
    npm run build
    ```
-3. Find your installer at: `dist/WorkTracker Setup 6.1.0.exe`
+3. Find your installer at: `dist/WorkTracker Setup 6.3.0.exe`
 
 ## What you get
 - `.exe` NSIS installer for Windows 10/11
@@ -148,6 +148,36 @@ Exports are saved to subfolders inside `%AppData%\worktracker\exports\`:
 
 Use the **Open Exports Folder** button in the Report or Planner page to open the folder directly.
 
+## Project Structure
+
+```
+worktracker/
+├── main.js          # Electron main process — window, tray, IPC, auth server, idle poll
+├── preload.js       # Context bridge — exposes safe APIs to the renderer
+├── app.js           # Renderer — all UI logic
+├── index.html       # Main app shell
+├── overlay.html     # Floating timer overlay widget
+├── style.css        # Global dark-theme styles
+├── package.json     # Metadata + electron-builder config
+├── installer.nsi    # Custom NSIS installer hooks
+├── assets/
+│   ├── icon.ico
+│   └── icon.png
+└── LICENSE.txt
+```
+
+## Google OAuth Setup (for developers)
+
+The sign-in flow uses the implicit OAuth flow from the system browser. To use your own Google Cloud project:
+
+1. Go to **Google Cloud Console → APIs & Services → Credentials**
+2. Edit your OAuth 2.0 Client ID
+3. Under **Authorized redirect URIs**, add exactly:
+   ```
+   http://localhost:42831/auth
+   ```
+4. Update `CLIENT_ID` in `main.js` with your own client ID
+
 ## Holiday Data
 Public holidays are fetched based on the Country / Region selected in Settings.  
 Sri Lanka holidays are fetched automatically from:  
@@ -157,3 +187,21 @@ https://github.com/Dilshan-H/srilanka-holidays
 - Data sourced from official Sri Lankan government gazette
 - Updated every year by the open-source maintainer
 - Cached locally after first load (one fetch per year)
+
+## Dependencies
+
+| Package | Purpose |
+|---|---|
+| `electron` | Desktop app shell |
+| `electron-builder` | Packaging & NSIS installer |
+| `@napi-rs/canvas` | PDF canvas rendering for exports |
+| `uuid` | Unique ID generation for tasks, sessions, projects |
+
+Firebase SDK is loaded from CDN at runtime (see `index.html`).
+
+## License
+
+WorkTracker — End User License Agreement  
+Version 6.3.0  
+Copyright © 2024 Chama Bro. All rights reserved.  
+See `LICENSE.txt` for full terms.
