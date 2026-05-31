@@ -476,17 +476,17 @@ function _fmtCountdown(secs) {
 }
 
 function _setCardIdleState(mode, countdownSecs) {
-  const card  = document.getElementById('active-timer-card');
+  const card = document.getElementById('active-timer-card');
   const label = document.getElementById('active-timer-label');
-  const warn  = document.getElementById('idle-warning-inline');
+  const warn = document.getElementById('idle-warning-inline');
   const idleBox = document.getElementById('idle-full-box');
   if (!card) return;
 
   if (mode === 'active') {
     card.classList.remove('idle-warning', 'idle-active');
-    if (warn)    { warn.style.display = 'none'; }
+    if (warn) { warn.style.display = 'none'; }
     if (idleBox) { idleBox.style.display = 'none'; }
-    if (label)   { label.style.display = 'flex'; }
+    if (label) { label.style.display = 'flex'; }
 
   } else if (mode === 'warning') {
     card.classList.add('idle-warning');
@@ -496,14 +496,14 @@ function _setCardIdleState(mode, countdownSecs) {
       document.getElementById('idle-warn-countdown').textContent = _fmtCountdown(countdownSecs);
     }
     if (idleBox) { idleBox.style.display = 'none'; }
-    if (label)   { label.style.display = 'flex'; }
+    if (label) { label.style.display = 'flex'; }
 
   } else if (mode === 'idle') {
     card.classList.add('idle-active');
     card.classList.remove('idle-warning');
-    if (warn)    { warn.style.display = 'none'; }
+    if (warn) { warn.style.display = 'none'; }
     if (idleBox) { idleBox.style.display = 'flex'; }
-    if (label)   { label.style.display = 'flex'; }  // keep label visible — timer still running
+    if (label) { label.style.display = 'flex'; }  // keep label visible — timer still running
   }
 }
 
@@ -767,14 +767,68 @@ function stopTask(taskId) {
   const task = state.tasks.find(t => t.id === taskId);
   showConfirm('Stop Task', `Mark "${task?.name || 'this task'}" as complete?`, () => {
     if (state.activeTaskId === taskId) {
-      stopCurrentSession(true);
+      stopCurrentSession(true); // handles planner sync internally
     } else {
       if (task) task.status = 'completed';
+      // Sync to planner: mark linked planner task done
+      const linkedPlannerTask = plannerState.plannerTasks.find(pt => pt.linkedTaskId === taskId);
+      if (linkedPlannerTask && !linkedPlannerTask.done) linkedPlannerTask.done = true;
       saveData();
     }
     renderAll();
     showNotif(`Stopped: ${task?.name}`, 'success');
   });
+}
+
+// ── Planner → Timer Link ──────────────────────────────────────────────────────
+// Find or create a tracker task linked to a planner task, then start/pause it.
+function startTimerFromPlannerTask(plannerTaskId) {
+  const pt = plannerState.plannerTasks.find(t => t.id === plannerTaskId);
+  if (!pt) return;
+
+  // If a linked tracker task already exists, use it; otherwise create one today
+  let linkedTask = pt.linkedTaskId ? state.tasks.find(t => t.id === pt.linkedTaskId) : null;
+
+  // Only reuse a linked task that's from today (otherwise create a new daily entry)
+  if (linkedTask && linkedTask.date !== todayStr()) linkedTask = null;
+
+  if (!linkedTask) {
+    linkedTask = {
+      id: genId(),
+      name: pt.name,
+      category: 'development',
+      notes: `Planner task (auto-linked)`,
+      status: 'idle',
+      createdAt: new Date().toISOString(),
+      date: todayStr(),
+    };
+    state.tasks.unshift(linkedTask);
+    // Store the link on the planner task
+    pt.linkedTaskId = linkedTask.id;
+  }
+
+  // Toggle: if already running this task, pause it
+  if (state.activeTaskId === linkedTask.id) {
+    pauseTask(linkedTask.id);
+  } else {
+    startTask(linkedTask.id);
+  }
+
+  // Re-render the board so the button state updates
+  renderBoard();
+}
+
+// Return total ms tracked for a planner task (via its linked tracker task, all sessions)
+function getPlannerTaskTrackedMs(plannerTaskId) {
+  const pt = plannerState.plannerTasks.find(t => t.id === plannerTaskId);
+  if (!pt?.linkedTaskId) return 0;
+  return getTaskTotalMs(pt.linkedTaskId);
+}
+
+// Return total ms tracked for all planner tasks in a version
+function getVersionTrackedMs(versionId) {
+  const tasks = plannerState.plannerTasks.filter(t => t.versionId === versionId);
+  return tasks.reduce((sum, t) => sum + getPlannerTaskTrackedMs(t.id), 0);
 }
 
 function stopCurrentSession(markCompleted) {
@@ -795,6 +849,15 @@ function stopCurrentSession(markCompleted) {
   });
 
   if (task) task.status = markCompleted ? 'completed' : 'paused';
+
+  // Sync to planner: if a tracker task is marked complete, tick its linked planner task done
+  if (markCompleted && task) {
+    const linkedPlannerTask = plannerState.plannerTasks.find(pt => pt.linkedTaskId === task.id);
+    if (linkedPlannerTask && !linkedPlannerTask.done) {
+      linkedPlannerTask.done = true;
+      // Board re-render happens via renderAll() in the caller (stopTask → renderAll)
+    }
+  }
 
   state.activeTaskId = null;
   state.activeSessionStart = null;
@@ -883,6 +946,34 @@ function updateLiveTimer() {
 
   // Update dashboard stats
   updateDashboardStats();
+
+  // Tick progress bar and session meta chips every second
+  const fillEl = document.getElementById('atc-progress-fill');
+  const progLabelEl = document.getElementById('atc-progress-label');
+  if (fillEl && progLabelEl && state.activeSessionStart) {
+    const todayTotalMs = state.sessions
+      .filter(s => s.date === todayStr())
+      .reduce((a, s) => a + (s.duration || 0), 0)
+      + (Date.now() - state.activeSessionStart);
+    const goalMs = 8 * 60 * 60 * 1000;
+    const pct = Math.min(100, Math.round((todayTotalMs / goalMs) * 100));
+    fillEl.style.width = pct + '%';
+    progLabelEl.textContent = `${pct}% of 8h goal · ${formatDurationShort(todayTotalMs)} tracked today`;
+  }
+
+  // Update any planner task cards linked to the active tracker task
+  document.querySelectorAll('.planner-task-tracked-time[data-linked-task-id]').forEach(el => {
+    if (el.dataset.linkedTaskId === state.activeTaskId) {
+      const ms = getTaskTotalMs(state.activeTaskId);
+      el.textContent = ms > 0 ? formatDurationShort(ms) : '0s';
+      el.classList.toggle('has-time', ms > 0);
+    }
+  });
+  // Update version time summaries
+  document.querySelectorAll('.vts-time[data-ver-id]').forEach(el => {
+    const ms = getVersionTrackedMs(el.dataset.verId);
+    el.textContent = ms > 0 ? formatDurationShort(ms) : '—';
+  });
 }
 
 // ── Task CRUD ─────────────────────────────────────────────────────────────────
@@ -920,6 +1011,7 @@ function renderAll() {
   renderActiveTimerCard();
   updateDashboardStats();
   if (state.currentPage === 'report') renderReport();
+  if (state.currentPage === 'planner' && plannerState.currentProjectId) renderBoard();
   renderNotifBell();
 }
 
@@ -949,6 +1041,37 @@ function renderActiveTimerCard() {
   card.style.display = 'block';
   nameEl.textContent = `${getCategoryEmoji(task.category)} ${task.name}`;
   displayEl.textContent = formatDuration(getTaskTotalMs(task.id));
+
+  // Populate session start time chip
+  const startEl = document.getElementById('atc-start-time');
+  if (startEl && state.activeSessionStart) {
+    startEl.textContent = 'Started ' + new Date(state.activeSessionStart).toLocaleTimeString([], {
+      hour: '2-digit', minute: '2-digit',
+      timeZone: getUserTimezone(),
+    });
+  }
+
+  // Populate today's session count chip
+  const sessEl = document.getElementById('atc-session-count');
+  if (sessEl) {
+    const todaySessions = state.sessions.filter(s => s.taskId === state.activeTaskId && s.date === todayStr()).length;
+    const label = todaySessions === 0 ? 'First session today' : `${todaySessions} session${todaySessions !== 1 ? 's' : ''} today`;
+    sessEl.textContent = label;
+  }
+
+  // Progress bar: today's total work vs 8-hour goal
+  const fillEl = document.getElementById('atc-progress-fill');
+  const progLabelEl = document.getElementById('atc-progress-label');
+  if (fillEl && progLabelEl) {
+    const todayTotalMs = state.sessions
+      .filter(s => s.date === todayStr())
+      .reduce((a, s) => a + (s.duration || 0), 0)
+      + (state.activeSessionStart ? Date.now() - state.activeSessionStart : 0);
+    const goalMs = 8 * 60 * 60 * 1000;
+    const pct = Math.min(100, Math.round((todayTotalMs / goalMs) * 100));
+    fillEl.style.width = pct + '%';
+    progLabelEl.textContent = `${pct}% of 8h goal · ${formatDurationShort(todayTotalMs)} tracked today`;
+  }
 }
 
 function createTaskCard(task, options = {}) {
@@ -3423,6 +3546,13 @@ function renderBoard() {
             <svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
             Add task
           </button>
+          ${(() => {
+          const vMs = getVersionTrackedMs(ver.id);
+          return `<div class="version-time-summary">
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4.5" stroke="currentColor" stroke-width="1.2"/><path d="M5.5 3v2.5l1.5 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              Tracked: <span class="vts-time${vMs > 0 ? '' : ''}" data-ver-id="${ver.id}">${vMs > 0 ? formatDurationShort(vMs) : '—'}</span>
+            </div>`;
+        })()}
         </div>`;
 
       // Render tasks
@@ -3463,13 +3593,40 @@ function renderBoard() {
           ${task.notes ? `<div class="planner-task-notes">${task.notes}</div>` : ''}
           <div class="planner-task-footer">
             <span class="priority-badge ${task.priority || 'medium'}">${{ high: '🔴 High', medium: '🟡 Medium', low: '🟢 Low' }[task.priority || 'medium']}</span>
-          </div>`;
+          </div>
+          ${!locked && !task.done ? (() => {
+              const linkedTask = task.linkedTaskId ? state.tasks.find(t => t.id === task.linkedTaskId && t.date === todayStr()) : null;
+              const isRunning = linkedTask && state.activeTaskId === linkedTask.id;
+              const trackedMs = getPlannerTaskTrackedMs(task.id);
+              const linkedTaskId = linkedTask?.id || '';
+              return `<div class="planner-task-timer-row">
+              <button class="btn-planner-start-timer${isRunning ? ' running' : ''}" data-planner-task-id="${task.id}">
+                ${isRunning
+                  ? `<svg width="9" height="9" viewBox="0 0 9 9"><rect width="3" height="9" rx="1" fill="currentColor"/><rect x="5" width="3" height="9" rx="1" fill="currentColor"/></svg> Pause`
+                  : `<svg width="8" height="9" viewBox="0 0 8 9"><path d="M1 1l7 3.5L1 8V1z" fill="currentColor"/></svg> ${trackedMs > 0 ? 'Resume' : 'Start Timer'}`
+                }
+              </button>
+              <span class="planner-task-tracked-time${trackedMs > 0 ? ' has-time' : ''}" data-linked-task-id="${linkedTaskId}">${trackedMs > 0 ? formatDurationShort(trackedMs) : '—'}</span>
+            </div>`;
+            })() : ''}`;
 
           const tick = item.querySelector('.task-tick');
           tick?.addEventListener('change', () => {
             task.done = tick.checked;
+            // Sync to tracker task: ticking done → stop & complete linked tracker task
+            if (tick.checked && task.linkedTaskId) {
+              const linkedTracker = state.tasks.find(t => t.id === task.linkedTaskId);
+              if (linkedTracker && linkedTracker.status !== 'completed') {
+                if (state.activeTaskId === linkedTracker.id) {
+                  stopCurrentSession(true);
+                } else {
+                  linkedTracker.status = 'completed';
+                }
+              }
+            }
             savePlannerData();
             renderBoard();
+            renderAll();
           });
           if (!locked) {
             item.querySelector('[data-action="edit-task"]')?.addEventListener('click', () => openPlannerTaskModal(ver.id, task.id));
@@ -3482,6 +3639,10 @@ function renderBoard() {
               renderBoard();
               showNotif('Task deleted', 'info');
             });
+          });
+          item.querySelector('.btn-planner-start-timer')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            startTimerFromPlannerTask(task.id);
           });
           taskList.appendChild(item);
         });

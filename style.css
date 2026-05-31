@@ -252,67 +252,183 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 .header-actions { display: flex; gap: 10px; align-items: center; }
 
 /* ── Active Timer Card ── */
+/* ── Active Timer Card — redesigned ── */
 .active-timer-card {
-  background: linear-gradient(135deg, #7c6af710, #22d3ee08);
-  border: 1px solid var(--accent-glow);
-  border-radius: 14px;
-  padding: 24px 28px;
-  margin-bottom: 24px;
   position: relative;
+  background: #0e0e18;
+  border: 1px solid #7c6af728;
+  border-radius: 18px;
+  padding: 20px 24px 18px;
+  margin-bottom: 24px;
   overflow: hidden;
-}
-.active-timer-card::before {
-  content: '';
-  position: absolute; top: 0; left: 0; right: 0; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  transition: border-color 0.3s, box-shadow 0.3s;
+  box-shadow: 0 0 0 0 transparent;
 }
 
+/* Animated top border beam */
+.active-timer-card::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent 0%, #7c6af7 40%, #22d3ee 60%, transparent 100%);
+  background-size: 200% 100%;
+  animation: atc-beam 3s linear infinite;
+}
+@keyframes atc-beam {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Subtle radial glow in the background */
+.active-timer-card::after {
+  content: '';
+  position: absolute; top: -40%; right: -10%;
+  width: 280px; height: 280px;
+  background: radial-gradient(circle, #7c6af718 0%, transparent 70%);
+  pointer-events: none; border-radius: 50%;
+}
+
+/* Decorative ring bg element */
+.atc-ring-bg {
+  position: absolute; bottom: -50px; right: -50px;
+  width: 200px; height: 200px;
+  border-radius: 50%;
+  border: 1px solid #7c6af710;
+  pointer-events: none;
+}
+.atc-ring-bg::after {
+  content: '';
+  position: absolute; inset: 20px;
+  border-radius: 50%;
+  border: 1px solid #22d3ee08;
+}
+
+/* Top row */
+.atc-top-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px; flex-wrap: wrap; gap: 8px;
+}
 .active-timer-label {
   font-family: var(--font-mono); font-size: 10px; font-weight: 700;
-  letter-spacing: 0.12em; color: var(--accent); margin-bottom: 6px;
+  letter-spacing: 0.14em; color: var(--accent);
   display: flex; align-items: center; gap: 8px;
 }
-.active-timer-label::before {
-  content: ''; width: 8px; height: 8px; border-radius: 50%;
+.atc-pulse-dot {
+  width: 7px; height: 7px; border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 8px var(--accent);
   animation: pulse-dot 1.5s ease-in-out infinite;
+  flex-shrink: 0;
 }
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.6; transform: scale(0.8); }
+  50%       { opacity: 0.5; transform: scale(0.75); }
 }
 
-.active-timer-name { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+/* Meta chips */
+.atc-meta-chips {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.atc-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 600; font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background: #ffffff08; border: 1px solid #ffffff0e;
+  border-radius: 20px; padding: 3px 9px;
+  white-space: nowrap;
+}
 
+/* Body: task name left, timer right */
+.atc-body {
+  display: flex; align-items: center;
+  justify-content: space-between; gap: 16px;
+  margin-bottom: 14px;
+}
+.atc-left {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+}
+.atc-task-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.active-timer-name {
+  font-size: 17px; font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 280px;
+}
+
+/* Timer display */
 .active-timer-display {
-  font-family: var(--font-mono); font-size: 46px; font-weight: 700;
-  letter-spacing: 0.04em; color: var(--text-primary);
-  text-shadow: 0 0 30px var(--accent-glow);
-  margin: 8px 0 16px;
-  line-height: 1;
+  font-family: var(--font-mono); font-size: 42px; font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text-primary);
+  text-shadow: 0 0 24px #7c6af740;
+  line-height: 1; white-space: nowrap; flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
-.active-timer-controls { display: flex; gap: 10px; }
+/* Progress bar */
+.atc-progress-wrap {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 16px;
+}
+.atc-progress-bar {
+  flex: 1; height: 4px; border-radius: 4px;
+  background: #ffffff0c; overflow: hidden;
+}
+.atc-progress-fill {
+  height: 100%; border-radius: 4px; width: 0%;
+  background: linear-gradient(90deg, #7c6af7, #22d3ee);
+  transition: width 1s linear;
+}
+.atc-progress-label {
+  font-size: 10px; font-weight: 600; font-family: var(--font-mono);
+  color: var(--text-muted); white-space: nowrap;
+}
 
-/* ── Idle warning state — amber tint on card border ── */
+/* Controls */
+.active-timer-controls {
+  display: flex; gap: 10px;
+}
+.timer-ctrl-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 18px; border-radius: 10px; border: 1px solid;
+  cursor: pointer; font-family: var(--font-ui); font-size: 13px; font-weight: 600;
+  transition: all 0.15s; letter-spacing: 0.01em;
+}
+.timer-ctrl-btn.pause {
+  background: #f59e0b12; border-color: #f59e0b35; color: #f59e0b;
+}
+.timer-ctrl-btn.pause:hover { background: #f59e0b22; border-color: #f59e0b60; }
+.timer-ctrl-btn.stop {
+  background: linear-gradient(135deg, #7c6af718, #7c6af710);
+  border-color: #7c6af740; color: var(--accent);
+}
+.timer-ctrl-btn.stop:hover {
+  background: linear-gradient(135deg, #7c6af730, #7c6af720);
+  border-color: #7c6af7; box-shadow: 0 0 12px #7c6af720;
+}
+
+/* ── Idle warning state ── */
 .active-timer-card.idle-warning {
-  border-color: #f59e0b80;
-  background: linear-gradient(135deg, #f59e0b08, #22d3ee05);
+  border-color: #f59e0b50;
 }
 .active-timer-card.idle-warning::before {
-  background: linear-gradient(90deg, transparent, #f59e0b, transparent);
+  background: linear-gradient(90deg, transparent 0%, #f59e0b 40%, #fbbf24 60%, transparent 100%);
+  background-size: 200% 100%;
+}
+.active-timer-card.idle-warning::after {
+  background: radial-gradient(circle, #f59e0b12 0%, transparent 70%);
 }
 
-/* Warning badge inline next to CURRENTLY TRACKING */
 .idle-warning-inline {
   display: inline-flex; align-items: center; gap: 5px;
-  margin-left: 10px;
+  margin-left: 8px;
   font-family: var(--font-mono); font-size: 10px; font-weight: 700;
   color: #f59e0b;
-  background: #f59e0b15; border: 1px solid #f59e0b40;
-  border-radius: 5px; padding: 2px 8px;
-  animation: idle-badge-pulse 3s ease-in-out infinite;
+  background: #f59e0b14; border: 1px solid #f59e0b35;
+  border-radius: 20px; padding: 2px 9px;
+  animation: idle-badge-pulse 2s ease-in-out infinite;
 }
 #idle-warn-countdown {
   color: #fbbf24; font-size: 11px; font-weight: 700;
@@ -320,58 +436,41 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 }
 @keyframes idle-badge-pulse {
   0%, 100% { opacity: 1; }
-  50%       { opacity: 0.65; }
+  50%       { opacity: 0.6; }
 }
 
-/* ── Full idle state — card turns orange, timer still running ── */
+/* ── Full idle state ── */
 .active-timer-card.idle-active {
-  background: linear-gradient(135deg, #f59e0b22, #f59e0b0a) !important;
-  border-color: #f59e0b !important;
-  box-shadow: 0 0 32px #f59e0b28, 0 0 0 1px #f59e0b40;
+  border-color: #f59e0b60 !important;
+  box-shadow: 0 0 28px #f59e0b18, 0 0 0 1px #f59e0b30 !important;
   animation: idle-card-pulse 2.5s ease-in-out infinite;
 }
 @keyframes idle-card-pulse {
-  0%, 100% { box-shadow: 0 0 32px #f59e0b28, 0 0 0 1px #f59e0b40; }
-  50%       { box-shadow: 0 0 48px #f59e0b45, 0 0 0 1px #f59e0b80; }
+  0%, 100% { box-shadow: 0 0 28px #f59e0b18, 0 0 0 1px #f59e0b30; }
+  50%       { box-shadow: 0 0 44px #f59e0b32, 0 0 0 1px #f59e0b60; }
 }
 .active-timer-card.idle-active::before {
-  background: linear-gradient(90deg, transparent, #f59e0b, transparent) !important;
-  opacity: 1 !important;
+  background: linear-gradient(90deg, transparent 0%, #f59e0b 40%, #fbbf24 60%, transparent 100%) !important;
+  background-size: 200% 100% !important;
 }
 .active-timer-card.idle-active .active-timer-display {
-  color: #f59e0b90;
-  text-shadow: 0 0 20px #f59e0b40;
+  color: #f59e0b80;
+  text-shadow: 0 0 16px #f59e0b30;
 }
-.active-timer-card.idle-active .active-timer-name {
-  color: #f59e0b70;
-}
+.active-timer-card.idle-active .active-timer-name { color: #f59e0b70; }
 
-/* Idle full-box message */
 .idle-full-box {
   display: flex; flex-direction: column; align-items: flex-start;
-  gap: 3px; margin-bottom: 8px;
+  gap: 3px; margin-bottom: 10px;
 }
-.idle-full-icon { font-size: 22px; margin-bottom: 3px; }
+.idle-full-icon { font-size: 20px; margin-bottom: 2px; }
 .idle-full-text {
-  font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
   letter-spacing: 0.12em; color: #f59e0b;
   text-transform: uppercase;
   animation: idle-badge-pulse 2s ease-in-out infinite;
 }
-.idle-full-sub {
-  font-size: 12px; color: #f59e0b90;
-}
-
-.timer-ctrl-btn {
-  display: flex; align-items: center; gap: 8px;
-  padding: 9px 18px; border-radius: 8px; border: 1px solid;
-  cursor: pointer; font-family: var(--font-ui); font-size: 13px; font-weight: 600;
-  transition: all 0.15s;
-}
-.timer-ctrl-btn.pause { background: #f59e0b15; border-color: #f59e0b40; color: #f59e0b; }
-.timer-ctrl-btn.pause:hover { background: #f59e0b25; }
-.timer-ctrl-btn.stop { background: #ef444415; border-color: #ef444440; color: #ef4444; }
-.timer-ctrl-btn.stop:hover { background: #ef444425; }
+.idle-full-sub { font-size: 12px; color: #f59e0b90; }
 
 /* ── Summary Grid ── */
 .summary-grid {
@@ -1240,6 +1339,38 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 }
 .drag-handle:hover { color: #ffffff70; }
 .drag-handle:active { cursor: grabbing; }
+
+/* ── Planner ▶ Timer Integration ── */
+.planner-task-timer-row {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 7px;
+}
+.btn-planner-start-timer {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 20px;
+  background: var(--accent-dim); border: 1px solid var(--accent-glow);
+  color: var(--accent); font-size: 10px; font-weight: 700;
+  cursor: pointer; transition: all 0.15s; font-family: var(--font-ui);
+  white-space: nowrap;
+}
+.btn-planner-start-timer:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-planner-start-timer.running {
+  background: #10b98120; border-color: #10b98140; color: #10b981;
+}
+.btn-planner-start-timer.running:hover { background: #10b981; color: #fff; border-color: #10b981; }
+.planner-task-tracked-time {
+  font-size: 10px; font-weight: 700; font-family: var(--font-mono);
+  color: var(--text-secondary); letter-spacing: 0.03em;
+  padding: 2px 6px; border-radius: 6px;
+  background: #ffffff08; border: 1px solid var(--border);
+}
+.planner-task-tracked-time.has-time { color: var(--accent2); border-color: #22d3ee30; background: #22d3ee0a; }
+.version-time-summary {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--text-muted); font-weight: 600;
+  padding: 6px 0 2px;
+}
+.version-time-summary .vts-time { color: var(--accent2); font-family: var(--font-mono); font-size: 11px; }
 
 .planner-task-item.dragging {
   opacity: 0.4;

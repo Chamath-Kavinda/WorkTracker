@@ -630,34 +630,64 @@
 
         <!-- Active Timer Display -->
         <div class="active-timer-card" id="active-timer-card" style="display:none">
-          <div class="active-timer-label" id="active-timer-label">
-            CURRENTLY TRACKING
-            <!-- Warning badge — shown 60s before threshold -->
-            <span class="idle-warning-inline" id="idle-warning-inline" style="display:none">
-              ⚠ Going idle in: <span id="idle-warn-countdown">1:00</span>
-            </span>
+
+          <!-- Background ring decoration -->
+          <div class="atc-ring-bg" aria-hidden="true"></div>
+
+          <!-- Top row: status label + idle warning + meta chips -->
+          <div class="atc-top-row">
+            <div class="active-timer-label" id="active-timer-label">
+              <span class="atc-pulse-dot"></span>
+              CURRENTLY TRACKING
+              <span class="idle-warning-inline" id="idle-warning-inline" style="display:none">
+                ⚠ Going idle in: <span id="idle-warn-countdown">1:00</span>
+              </span>
+            </div>
+            <div class="atc-meta-chips" id="atc-meta-chips">
+              <span class="atc-chip" id="atc-chip-start">
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4.5" stroke="currentColor" stroke-width="1.2"/><path d="M5.5 3v2.5l1.5 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                <span id="atc-start-time">—</span>
+              </span>
+              <span class="atc-chip" id="atc-chip-sessions">
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 2.5h7M2 5.5h5M2 8.5h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                <span id="atc-session-count">—</span>
+              </span>
+            </div>
           </div>
-          <!-- Full idle overlay inside the card -->
+
+          <!-- Idle full-box message -->
           <div class="idle-full-box" id="idle-full-box" style="display:none">
             <div class="idle-full-icon">☕</div>
             <div class="idle-full-text">You are in idle mode</div>
             <div class="idle-full-sub">Move your mouse or press a key to resume</div>
           </div>
-          <div class="active-timer-name" id="active-timer-name">—</div>
-          <div class="active-timer-display" id="active-timer-display">00:00:00</div>
+
+          <!-- Main content: task name + timer side by side -->
+          <div class="atc-body">
+            <div class="atc-left">
+              <div class="atc-task-label">Task</div>
+              <div class="active-timer-name" id="active-timer-name">—</div>
+            </div>
+            <div class="active-timer-display" id="active-timer-display">00:00:00</div>
+          </div>
+
+          <!-- Progress bar: today's session time vs 8h target -->
+          <div class="atc-progress-wrap">
+            <div class="atc-progress-bar">
+              <div class="atc-progress-fill" id="atc-progress-fill"></div>
+            </div>
+            <span class="atc-progress-label" id="atc-progress-label">0% of 8h goal</span>
+          </div>
+
+          <!-- Controls -->
           <div class="active-timer-controls">
             <button class="timer-ctrl-btn pause" id="btn-pause-active">
-              <svg width="14" height="16" viewBox="0 0 14 16">
-                <rect x="0" y="0" width="5" height="16" rx="2" fill="currentColor" />
-                <rect x="9" y="0" width="5" height="16" rx="2" fill="currentColor" />
-              </svg>
+              <svg width="12" height="14" viewBox="0 0 12 14"><rect x="0" y="0" width="4" height="14" rx="2" fill="currentColor"/><rect x="8" y="0" width="4" height="14" rx="2" fill="currentColor"/></svg>
               Pause
             </button>
             <button class="timer-ctrl-btn stop" id="btn-stop-active">
-              <svg width="14" height="14" viewBox="0 0 14 14">
-                <rect width="14" height="14" rx="2" fill="currentColor" />
-              </svg>
-              Stop
+              <svg width="12" height="12" viewBox="0 0 12 12"><rect width="12" height="12" rx="2" fill="currentColor"/></svg>
+              Stop &amp; Complete
             </button>
           </div>
         </div>
