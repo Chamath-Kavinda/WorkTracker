@@ -840,7 +840,10 @@ function createTaskCard(task, options = {}) {
            </button>`
       : ''}
       ${options.showDelete && taskDate >= todayStr()
-      ? `<button class="task-btn delete" title="Delete task" data-action="delete">
+      ? `<button class="task-btn edit" title="Edit task" data-action="edit">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 11l2.5-.5L11 4a1.4 1.4 0 00-2-2L2.5 8.5 2 11z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+           </button>
+           <button class="task-btn delete" title="Delete task" data-action="delete">
             <svg width="13" height="13" viewBox="0 0 13 13"><path d="M2 3h9M5 3V2h3v1M5 6v4M8 6v4M3 3l.7 8h5.6L10 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>
            </button>`
       : ''}
@@ -855,6 +858,7 @@ function createTaskCard(task, options = {}) {
       if (action === 'start') startTask(task.id);
       else if (action === 'pause') pauseTask(task.id);
       else if (action === 'stop') stopTask(task.id);
+      else if (action === 'edit') editTask(task.id);
       else if (action === 'delete') confirmDelete(task);
     });
   });
@@ -1600,6 +1604,255 @@ function renderReport(dateStr) {
   }
 }
 
+// ── Report view state ─────────────────────────────────────────────────────────
+let reportView = 'daily'; // 'daily' | 'weekly' | 'monthly'
+let reportWeekOffset = 0;  // 0 = current week, -1 = last week, etc.
+let reportMonthOffset = 0; // 0 = current month
+
+// Returns array of YYYY-MM-DD strings for the Mon–Sun week at weekOffset from today
+function getWeekDates(weekOffset) {
+  const today = new Date();
+  const dow = today.getDay(); // 0=Sun
+  const diffToMon = (dow === 0 ? -6 : 1 - dow);
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + diffToMon + weekOffset * 7);
+  const dates = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    dates.push(localDateStr(d));
+  }
+  return dates;
+}
+
+// Returns array of YYYY-MM-DD strings for every day of the month at monthOffset
+function getMonthDates(monthOffset) {
+  const today = new Date();
+  const target = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
+  const year = target.getFullYear();
+  const month = target.getMonth();
+  const days = new Date(year, month + 1, 0).getDate();
+  const dates = [];
+  for (let d = 1; d <= days; d++) {
+    dates.push(`${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+  }
+  return dates;
+}
+
+// Aggregate sessions for a list of dates → { date: { totalMs, taskCount, sessionCount } }
+function aggregateDates(dates) {
+  const map = {};
+  dates.forEach(d => { map[d] = { totalMs: 0, taskCount: 0, sessionCount: 0 }; });
+  state.sessions.forEach(s => {
+    if (map[s.date]) {
+      map[s.date].totalMs += s.duration;
+      map[s.date].sessionCount++;
+    }
+  });
+  // unique tasks per day
+  const taskSets = {};
+  dates.forEach(d => { taskSets[d] = new Set(); });
+  state.sessions.forEach(s => {
+    if (taskSets[s.date]) taskSets[s.date].add(s.taskId);
+  });
+  dates.forEach(d => { map[d].taskCount = taskSets[d].size; });
+  return map;
+}
+
+// Aggregate sessions by task across a list of dates → array sorted by totalMs desc
+function aggregateTasksAcrossDates(dates) {
+  const taskMap = {};
+  state.sessions
+    .filter(s => dates.includes(s.date))
+    .forEach(s => {
+      if (!taskMap[s.taskId]) {
+        taskMap[s.taskId] = { name: s.taskName, totalMs: 0, sessionCount: 0, daysWorked: new Set() };
+      }
+      taskMap[s.taskId].totalMs += s.duration;
+      taskMap[s.taskId].sessionCount++;
+      taskMap[s.taskId].daysWorked.add(s.date);
+    });
+  return Object.values(taskMap)
+    .sort((a, b) => b.totalMs - a.totalMs)
+    .map(t => ({ ...t, daysWorked: t.daysWorked.size }));
+}
+
+function renderReportSummaryView(dates, labelFn, grandTotalLabel) {
+  const dayMap = aggregateDates(dates);
+  const taskSummary = aggregateTasksAcrossDates(dates);
+  const todayDate = todayStr();
+  const grandTotal = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
+  const totalSessions = Object.values(dayMap).reduce((a, v) => a + v.sessionCount, 0);
+  const workedDays = Object.values(dayMap).filter(v => v.totalMs > 0).length;
+  const maxMs = Math.max(...Object.values(dayMap).map(v => v.totalMs), 1);
+
+  // ── summary cards
+  const summaryEl = document.getElementById('report-summary');
+  summaryEl.innerHTML = `
+    <div class="summary-card">
+      <div class="summary-icon" style="background:#7c6af720">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8" stroke="#7c6af7" stroke-width="1.5"/><path d="M10 6v4l2.5 2.5" stroke="#7c6af7" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </div>
+      <div class="summary-data">
+        <div class="summary-value">${formatDurationShort(grandTotal)}</div>
+        <div class="summary-label">Total Time</div>
+      </div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-icon" style="background:#22d3ee20">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 15V8l6-5 6 5v7" stroke="#22d3ee" stroke-width="1.5" stroke-linecap="round"/><rect x="7" y="10" width="6" height="5" rx="1" stroke="#22d3ee" stroke-width="1.5"/></svg>
+      </div>
+      <div class="summary-data">
+        <div class="summary-value">${workedDays}</div>
+        <div class="summary-label">Days Worked</div>
+      </div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-icon" style="background:#f59e0b20">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 4v6l3 3" stroke="#f59e0b" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="10" r="8" stroke="#f59e0b" stroke-width="1.5"/></svg>
+      </div>
+      <div class="summary-data">
+        <div class="summary-value">${workedDays > 0 ? formatDurationShort(Math.round(grandTotal / workedDays)) : '—'}</div>
+        <div class="summary-label">Daily Average</div>
+      </div>
+    </div>
+  `;
+
+  // ── hide daily table, show summary view
+  document.getElementById('report-table').closest('.report-table-wrapper').style.display = 'none';
+  const sv = document.getElementById('report-summary-view');
+  sv.style.display = '';
+
+  // Day-by-day bar rows
+  const rowsHtml = dates.map(d => {
+    const v = dayMap[d];
+    const pct = maxMs > 0 ? Math.max((v.totalMs / maxMs) * 100, v.totalMs > 0 ? 2 : 0) : 0;
+    const isToday = d === todayDate;
+    const label = labelFn(d);
+    return `
+      <div class="summary-period-row${isToday ? ' is-today' : ''}">
+        <div class="summary-period-date">${label}${isToday ? ' <span style="font-size:10px;color:#7c6af7;font-weight:700;">TODAY</span>' : ''}</div>
+        <div class="summary-period-bar-wrap">
+          <div class="summary-period-bar" style="width:${pct}%"></div>
+        </div>
+        ${v.totalMs > 0
+          ? `<div class="summary-period-dur">${formatDurationShort(v.totalMs)}</div>
+             <div class="summary-period-tasks">${v.taskCount} task${v.taskCount !== 1 ? 's' : ''}</div>`
+          : `<div class="summary-period-dur" style="color:#ffffff20">—</div>
+             <div class="summary-period-tasks summary-period-empty">no work</div>`
+        }
+      </div>`;
+  }).join('');
+
+  // Top tasks table
+  const topTasksHtml = taskSummary.length === 0
+    ? `<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;">No sessions in this period</div>`
+    : `<table class="report-table" style="margin-top:0">
+        <thead><tr>
+          <th>Task</th>
+          <th>Days Worked</th>
+          <th>Sessions</th>
+          <th>Total Time</th>
+          <th>Share</th>
+        </tr></thead>
+        <tbody>
+          ${taskSummary.map(t => {
+            const pct = grandTotal > 0 ? ((t.totalMs / grandTotal) * 100).toFixed(1) : '0.0';
+            return `<tr>
+              <td><strong>${t.name}</strong></td>
+              <td style="color:var(--text-secondary)">${t.daysWorked}</td>
+              <td style="color:var(--text-secondary)">${t.sessionCount}</td>
+              <td style="font-family:var(--font-mono);font-size:12px;color:#a78bfa">${formatDurationShort(t.totalMs)}</td>
+              <td>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div style="flex:1;height:5px;background:#ffffff08;border-radius:3px;overflow:hidden;min-width:60px">
+                    <div style="height:100%;border-radius:3px;background:#7c6af7;width:${pct}%"></div>
+                  </div>
+                  <span style="font-size:11px;color:var(--text-muted);min-width:36px">${pct}%</span>
+                </div>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+
+  sv.innerHTML = `
+    <div class="summary-period-grid">${rowsHtml}</div>
+    <div style="margin-top:20px">
+      <div style="font-size:12px;font-weight:700;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;">Task Breakdown</div>
+      <div class="report-table-wrapper" style="margin-bottom:0">${topTasksHtml}</div>
+    </div>
+  `;
+
+  // ── total bar
+  document.getElementById('report-total').innerHTML = `
+    <div class="report-total-label">${grandTotalLabel}</div>
+    <div class="report-total-value">${formatDurationShort(grandTotal)}</div>
+  `;
+}
+
+function renderReportWeekly() {
+  const dates = getWeekDates(reportWeekOffset);
+  const weekStart = new Date(dates[0] + 'T00:00:00');
+  const weekEnd = new Date(dates[6] + 'T00:00:00');
+  const fmtOpts = { month: 'short', day: 'numeric' };
+  const rangeLabel = `${weekStart.toLocaleDateString([], fmtOpts)} – ${weekEnd.toLocaleDateString([], { ...fmtOpts, year: 'numeric' })}`;
+
+  // Update nav label
+  document.getElementById('report-week-label').textContent = reportWeekOffset === 0 ? `(${rangeLabel})` : rangeLabel;
+
+  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  renderReportSummaryView(
+    dates,
+    (d) => {
+      const dt = new Date(d + 'T00:00:00');
+      const idx = dates.indexOf(d);
+      return `${dayNames[idx]}  ${dt.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
+    },
+    `Total — Week of ${weekStart.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`
+  );
+}
+
+function renderReportMonthly() {
+  const dates = getMonthDates(reportMonthOffset);
+  const ref = new Date(dates[0] + 'T00:00:00');
+  const monthName = ref.toLocaleDateString([], { month: 'long', year: 'numeric' });
+
+  document.getElementById('report-month-label').textContent = monthName;
+
+  renderReportSummaryView(
+    dates,
+    (d) => {
+      const dt = new Date(d + 'T00:00:00');
+      return dt.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    },
+    `Total — ${monthName}`
+  );
+}
+
+function switchReportView(view) {
+  reportView = view;
+  // Sync dropdown
+  const sel = document.getElementById('report-view-select');
+  if (sel) sel.value = view;
+  // Show/hide controls
+  document.getElementById('report-date').style.display = view === 'daily' ? '' : 'none';
+  document.getElementById('report-week-nav').style.display = view === 'weekly' ? 'flex' : 'none';
+  document.getElementById('report-month-nav').style.display = view === 'monthly' ? 'flex' : 'none';
+
+  if (view === 'daily') {
+    // Restore daily view
+    document.getElementById('report-table').closest('.report-table-wrapper').style.display = '';
+    document.getElementById('report-summary-view').style.display = 'none';
+    renderReport(document.getElementById('report-date').value);
+  } else if (view === 'weekly') {
+    renderReportWeekly();
+  } else {
+    renderReportMonthly();
+  }
+}
+
+
 function generateReportText(date) {
   const d = date || document.getElementById('report-date')?.value || todayStr();
   const sessions = state.sessions.filter(s => s.date === d);
@@ -1636,6 +1889,109 @@ function generateReportText(date) {
   return text;
 }
 
+function generateReportTextWeekly() {
+  const dates = getWeekDates(reportWeekOffset);
+  const weekStart = new Date(dates[0] + 'T00:00:00');
+  const weekEnd   = new Date(dates[6] + 'T00:00:00');
+  const fmtOpts   = { month: 'short', day: 'numeric' };
+  const rangeLabel = `${weekStart.toLocaleDateString([], fmtOpts)} – ${weekEnd.toLocaleDateString([], { ...fmtOpts, year: 'numeric' })}`;
+
+  const dayMap     = aggregateDates(dates);
+  const taskSummary = aggregateTasksAcrossDates(dates);
+  const grandTotal = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
+  const workedDays = Object.values(dayMap).filter(v => v.totalMs > 0).length;
+  const totalSessions = Object.values(dayMap).reduce((a, v) => a + v.sessionCount, 0);
+  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  let text = `WorkTracker Weekly Report\n`;
+  text += `Week: ${rangeLabel}\n`;
+  text += `Generated: ${new Date().toLocaleString()}\n`;
+  text += '═'.repeat(60) + '\n\n';
+
+  text += `SUMMARY\n`;
+  text += `  Total Work Time : ${formatDurationShort(grandTotal)}\n`;
+  text += `  Days Worked     : ${workedDays} / 7\n`;
+  text += `  Total Sessions  : ${totalSessions}\n`;
+  text += `  Daily Average   : ${workedDays > 0 ? formatDurationShort(Math.round(grandTotal / workedDays)) : '—'}\n`;
+  text += '\n' + '─'.repeat(60) + '\n\n';
+
+  text += `DAY-BY-DAY BREAKDOWN\n\n`;
+  dates.forEach((d, i) => {
+    const v = dayMap[d];
+    const label = `${dayNames[i]}  ${new Date(d + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
+    const bar = v.totalMs > 0 ? '█'.repeat(Math.round((v.totalMs / (grandTotal || 1)) * 20)) : '░'.repeat(20);
+    text += `  ${label.padEnd(14)} ${bar}  ${v.totalMs > 0 ? formatDurationShort(v.totalMs) : 'No work'}\n`;
+    if (v.taskCount > 0) text += `                   Tasks: ${v.taskCount}  Sessions: ${v.sessionCount}\n`;
+  });
+  text += '\n' + '─'.repeat(60) + '\n\n';
+
+  if (taskSummary.length > 0) {
+    text += `TASK BREAKDOWN\n\n`;
+    taskSummary.forEach(t => {
+      const pct = grandTotal > 0 ? ((t.totalMs / grandTotal) * 100).toFixed(1) : '0.0';
+      text += `  Task: ${t.name}\n`;
+      text += `    Total Time  : ${formatDurationShort(t.totalMs)}  (${pct}%)\n`;
+      text += `    Days Worked : ${t.daysWorked}\n`;
+      text += `    Sessions    : ${t.sessionCount}\n`;
+      text += '  ' + '─'.repeat(40) + '\n';
+    });
+  }
+
+  text += `\nTOTAL WORK TIME: ${formatDurationShort(grandTotal)}\n`;
+  return text;
+}
+
+function generateReportTextMonthly() {
+  const dates = getMonthDates(reportMonthOffset);
+  const ref = new Date(dates[0] + 'T00:00:00');
+  const monthName = ref.toLocaleDateString([], { month: 'long', year: 'numeric' });
+
+  const dayMap      = aggregateDates(dates);
+  const taskSummary = aggregateTasksAcrossDates(dates);
+  const grandTotal  = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
+  const workedDays  = Object.values(dayMap).filter(v => v.totalMs > 0).length;
+  const totalSessions = Object.values(dayMap).reduce((a, v) => a + v.sessionCount, 0);
+
+  let text = `WorkTracker Monthly Report\n`;
+  text += `Month: ${monthName}\n`;
+  text += `Generated: ${new Date().toLocaleString()}\n`;
+  text += '═'.repeat(60) + '\n\n';
+
+  text += `SUMMARY\n`;
+  text += `  Total Work Time : ${formatDurationShort(grandTotal)}\n`;
+  text += `  Days Worked     : ${workedDays} / ${dates.length}\n`;
+  text += `  Total Sessions  : ${totalSessions}\n`;
+  text += `  Daily Average   : ${workedDays > 0 ? formatDurationShort(Math.round(grandTotal / workedDays)) : '—'}\n`;
+  text += '\n' + '─'.repeat(60) + '\n\n';
+
+  text += `DAY-BY-DAY BREAKDOWN\n\n`;
+  dates.forEach(d => {
+    const v = dayMap[d];
+    if (v.totalMs === 0) return; // skip empty days in monthly to keep it concise
+    const label = new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    const bar = '█'.repeat(Math.round((v.totalMs / (grandTotal || 1)) * 20));
+    text += `  ${label.padEnd(14)} ${bar}  ${formatDurationShort(v.totalMs)}\n`;
+    text += `                   Sessions: ${v.sessionCount}  Tasks: ${v.taskCount}\n`;
+  });
+  if (workedDays === 0) text += `  No work sessions recorded this month.\n`;
+  text += '\n' + '─'.repeat(60) + '\n\n';
+
+  if (taskSummary.length > 0) {
+    text += `TASK BREAKDOWN\n\n`;
+    taskSummary.forEach(t => {
+      const pct = grandTotal > 0 ? ((t.totalMs / grandTotal) * 100).toFixed(1) : '0.0';
+      text += `  Task: ${t.name}\n`;
+      text += `    Total Time  : ${formatDurationShort(t.totalMs)}  (${pct}%)\n`;
+      text += `    Days Worked : ${t.daysWorked}\n`;
+      text += `    Sessions    : ${t.sessionCount}\n`;
+      text += '  ' + '─'.repeat(40) + '\n';
+    });
+  }
+
+  text += `\nTOTAL WORK TIME: ${formatDurationShort(grandTotal)}\n`;
+  return text;
+}
+
 // ── Modal ─────────────────────────────────────────────────────────────────────
 function showModal() {
   document.getElementById('task-name-input').value = '';
@@ -1668,6 +2024,50 @@ function confirmDelete(task) {
   });
 }
 
+function editTask(taskId) {
+  const task = state.tasks.find(t => t.id === taskId);
+  if (!task) return;
+  document.getElementById('edit-task-id').value = taskId;
+  document.getElementById('edit-task-name').value = task.name;
+  document.getElementById('edit-task-category').value = task.category || 'work';
+  document.getElementById('edit-task-notes').value = task.notes || '';
+  document.getElementById('edit-modal-overlay').style.display = 'flex';
+  setTimeout(() => document.getElementById('edit-task-name').focus(), 50);
+}
+
+function hideEditModal() {
+  document.getElementById('edit-modal-overlay').style.display = 'none';
+}
+
+function saveEditTask() {
+  const taskId = document.getElementById('edit-task-id').value;
+  const name = document.getElementById('edit-task-name').value.trim();
+  const category = document.getElementById('edit-task-category').value;
+  const notes = document.getElementById('edit-task-notes').value.trim();
+
+  if (!name) {
+    document.getElementById('edit-task-name').focus();
+    return;
+  }
+
+  const task = state.tasks.find(t => t.id === taskId);
+  if (!task) return;
+
+  task.name = name;
+  task.category = category;
+  task.notes = notes;
+
+  // Keep session taskName in sync for any sessions already saved today
+  state.sessions.forEach(s => {
+    if (s.taskId === taskId) s.taskName = name;
+  });
+
+  saveData();
+  renderAll();
+  hideEditModal();
+  showNotif(`Task updated: ${name}`, 'success');
+}
+
 // ── Notifications ─────────────────────────────────────────────────────────────
 function showNotif(msg, type = 'info') {
   const el = document.createElement('div');
@@ -1688,7 +2088,11 @@ function switchPage(page) {
   document.getElementById(`page-${page}`)?.classList.add('active');
   document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
 
-  if (page === 'report') renderReport();
+  if (page === 'report') {
+    if (reportView === 'daily') renderReport();
+    else if (reportView === 'weekly') renderReportWeekly();
+    else renderReportMonthly();
+  }
   if (page === 'calendar') renderCalendar().catch(console.error);
 }
 
@@ -1741,126 +2145,507 @@ function updateDateDisplay() {
 
 // ── Export Report ─────────────────────────────────────────────────────────────
 async function exportReport(format) {
-  const date = document.getElementById('report-date').value;
-  const content = generateReportText(date);
-  const dateStr = date || new Date().toISOString().split('T')[0];
+  if (reportView === 'weekly') {
+    await _exportReportWeekly(format);
+  } else if (reportView === 'monthly') {
+    await _exportReportMonthly(format);
+  } else {
+    await _exportReportDaily(format);
+  }
+}
+
+// ── Shared PDF helpers ────────────────────────────────────────────────────────
+function _pdfHeader(doc, title, subtitle) {
+  const pageW = doc.internal.pageSize.getWidth();
+  doc.setFillColor(30, 20, 60);
+  doc.rect(0, 0, pageW, 28, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text(title, 20, 17);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(subtitle, pageW - 20, 17, { align: 'right' });
+}
+
+function _pdfSummaryBox(doc, y, col1, col2, col3) {
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = 20;
+  doc.setFillColor(245, 245, 255);
+  doc.roundedRect(margin, y, pageW - margin * 2, 12, 3, 3, 'F');
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(60, 60, 60);
+  doc.text(col1, margin + 6, y + 8);
+  doc.text(col2, pageW / 2, y + 8, { align: 'center' });
+  doc.text(col3, pageW - margin - 6, y + 8, { align: 'right' });
+  return y + 18;
+}
+
+function _pdfSectionTitle(doc, y, text) {
+  const pageW = doc.internal.pageSize.getWidth();
+  doc.setFillColor(124, 106, 247);
+  doc.roundedRect(20, y, pageW - 40, 7, 2, 2, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.text(text, 25, y + 5);
+  return y + 12;
+}
+
+function _pdfFooter(doc) {
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 20;
+  doc.setDrawColor(200, 200, 200);
+  doc.line(margin, pageH - 14, pageW - margin, pageH - 14);
+  doc.setFontSize(7.5);
+  doc.setTextColor(160, 160, 160);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Generated by WorkTracker', margin, pageH - 8);
+  doc.text(new Date().toLocaleString(), pageW - margin, pageH - 8, { align: 'right' });
+}
+
+// ── Daily export ──────────────────────────────────────────────────────────────
+async function _exportReportDaily(format) {
+  const date    = document.getElementById('report-date').value;
+  const dateStr = date || todayStr();
 
   if (format === 'txt') {
-    const filepath = await api.exportReport({ content, filename: `worktracker-report-${dateStr}.txt`, folder: 'Reports' });
+    const content  = generateReportText(dateStr);
+    const filepath = await api.exportReport({ content, filename: `worktracker-daily-${dateStr}.txt`, folder: 'Reports' });
     showNotif(`Report saved: ${filepath}`, 'success');
-  } else if (format === 'pdf') {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-    const margin = 20;
-    let y = margin;
+    return;
+  }
 
-    const checkPage = (needed = 10) => {
-      if (y + needed > pageH - margin) { doc.addPage(); y = margin; }
-    };
+  // PDF — original design (Image 1 style)
+  const { jsPDF } = window.jspdf;
+  const doc    = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW  = doc.internal.pageSize.getWidth();
+  const pageH  = doc.internal.pageSize.getHeight();
+  const margin = 20;
+  let y = margin;
 
-    // ── Header bar
-    doc.setFillColor(30, 20, 60);
-    doc.rect(0, 0, pageW, 28, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(18);
+  const checkPage = (needed = 10) => {
+    if (y + needed > pageH - margin) { doc.addPage(); y = margin; }
+  };
+
+  const d = dateStr;
+
+  // ── Header bar (deep navy)
+  doc.setFillColor(30, 20, 60);
+  doc.rect(0, 0, pageW, 28, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(18);
+  doc.setFont('helvetica', 'bold');
+  doc.text('WorkTracker Report', margin, 18);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(
+    new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+    pageW - margin, 18, { align: 'right' }
+  );
+  y = 40;
+
+  // ── Generated timestamp
+  doc.setTextColor(80, 80, 80);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Generated: ${new Date().toLocaleString()}`, margin, y);
+  y += 12;
+
+  // ── Build task data
+  const sessions = state.sessions.filter(s => s.date === d);
+  const taskMap  = {};
+  sessions.forEach(s => {
+    if (!taskMap[s.taskId]) taskMap[s.taskId] = { name: s.taskName, sessions: [], totalMs: 0 };
+    taskMap[s.taskId].sessions.push(s);
+    taskMap[s.taskId].totalMs += s.duration;
+  });
+  const grandTotal = Object.values(taskMap).reduce((a, t) => a + t.totalMs, 0);
+
+  // ── Summary box (light lavender)
+  doc.setFillColor(245, 245, 255);
+  doc.roundedRect(margin, y, pageW - margin * 2, 12, 3, 3, 'F');
+  doc.setTextColor(60, 60, 60);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Total Work Time: ${formatDurationShort(grandTotal)}`, margin + 6, y + 8);
+  doc.text(`Tasks: ${Object.keys(taskMap).length}`, pageW / 2, y + 8, { align: 'center' });
+  doc.text(`Sessions: ${sessions.length}`, pageW - margin - 6, y + 8, { align: 'right' });
+  y += 18;
+
+  // ── Table header (solid purple)
+  doc.setFillColor(124, 106, 247);
+  doc.rect(margin, y, pageW - margin * 2, 8, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  const cols = [margin + 3, 90, 120, 148, 172];
+  doc.text('TASK',     cols[0], y + 5.5);
+  doc.text('SESSIONS', cols[1], y + 5.5);
+  doc.text('START',    cols[2], y + 5.5);
+  doc.text('END',      cols[3], y + 5.5);
+  doc.text('DURATION', cols[4], y + 5.5);
+  y += 8;
+
+  // ── Table rows
+  let rowIndex = 0;
+  Object.values(taskMap).forEach(data => {
+    checkPage(10);
+    if (rowIndex % 2 === 0) {
+      doc.setFillColor(248, 248, 252);
+      doc.rect(margin, y, pageW - margin * 2, 9, 'F');
+    }
+    const first = data.sessions[0];
+    const last  = data.sessions[data.sessions.length - 1];
+    doc.setTextColor(30, 30, 30);
     doc.setFont('helvetica', 'bold');
-    doc.text('WorkTracker Report', margin, 18);
+    doc.setFontSize(9);
+    doc.text(doc.splitTextToSize(data.name, cols[1] - cols[0] - 2)[0], cols[0], y + 6);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(80, 80, 80);
+    doc.text(String(data.sessions.length), cols[1], y + 6);
+    doc.text(first ? formatTime(first.startTime) : '—', cols[2], y + 6);
+    doc.text(last?.endTime ? formatTime(last.endTime) : 'Running', cols[3], y + 6);
+    doc.setTextColor(100, 80, 220);
+    doc.setFont('helvetica', 'bold');
+    doc.text(formatDurationShort(data.totalMs), cols[4], y + 6);
+    y += 9;
+    rowIndex++;
+  });
 
-    // Date top right
+  if (Object.keys(taskMap).length === 0) {
+    doc.setTextColor(180, 180, 180);
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    const d = date || todayStr();
-    doc.text(new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), pageW - margin, 18, { align: 'right' });
+    doc.text('No sessions recorded for this day.', margin + 4, y + 8);
+    y += 16;
+  }
 
-    y = 40;
+  // ── Footer line
+  y += 6;
+  checkPage(12);
+  doc.setDrawColor(200, 200, 200);
+  doc.line(margin, y, pageW - margin, y);
+  y += 8;
+  doc.setFontSize(8);
+  doc.setTextColor(150, 150, 150);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Generated by WorkTracker', margin, y);
+  doc.text('Page 1', pageW - margin, y, { align: 'right' });
 
-    // ── Meta info
-    doc.setTextColor(80, 80, 80);
-    doc.setFontSize(9);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, margin, y);
-    y += 12;
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(doc.output('arraybuffer'))));
+  const filepath = await api.exportReport({ content: base64, filename: `worktracker-daily-${dateStr}.pdf`, isPdf: true, folder: 'Reports' });
+  showNotif(`PDF saved: ${filepath}`, 'success');
+}
 
-    // ── Summary box
-    const sessions = state.sessions.filter(s => s.date === d);
-    const taskMap = {};
-    sessions.forEach(s => {
-      if (!taskMap[s.taskId]) taskMap[s.taskId] = { name: s.taskName, sessions: [], totalMs: 0 };
-      taskMap[s.taskId].sessions.push(s);
-      taskMap[s.taskId].totalMs += s.duration;
-    });
-    const grandTotal = Object.values(taskMap).reduce((a, t) => a + t.totalMs, 0);
+// ── Weekly export ─────────────────────────────────────────────────────────────
+async function _exportReportWeekly(format) {
+  const dates      = getWeekDates(reportWeekOffset);
+  const weekStart  = new Date(dates[0] + 'T00:00:00');
+  const weekEnd    = new Date(dates[6] + 'T00:00:00');
+  const fmtOpts    = { month: 'short', day: 'numeric' };
+  const rangeLabel = `${weekStart.toLocaleDateString([], fmtOpts)}–${weekEnd.toLocaleDateString([], { ...fmtOpts, year: 'numeric' })}`;
+  const fileSlug   = `${dates[0]}_${dates[6]}`;
 
-    doc.setFillColor(245, 245, 255);
-    doc.roundedRect(margin, y, pageW - margin * 2, 12, 3, 3, 'F');
+  if (format === 'txt') {
+    const content  = generateReportTextWeekly();
+    const filepath = await api.exportReport({ content, filename: `worktracker-weekly-${fileSlug}.txt`, folder: 'Reports' });
+    showNotif(`Report saved: ${filepath}`, 'success');
+    return;
+  }
+
+  // PDF
+  const { jsPDF } = window.jspdf;
+  const doc    = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW  = doc.internal.pageSize.getWidth();
+  const pageH  = doc.internal.pageSize.getHeight();
+  const margin = 20;
+  let y = margin;
+
+  const checkPage = (needed = 10) => {
+    if (y + needed > pageH - margin - 16) { doc.addPage(); y = margin; }
+  };
+
+  _pdfHeader(doc, 'WorkTracker Weekly Report', rangeLabel);
+  y = 38;
+
+  doc.setTextColor(100, 100, 100);
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Generated: ${new Date().toLocaleString()}`, margin, y);
+  y += 10;
+
+  const dayMap      = aggregateDates(dates);
+  const taskSummary = aggregateTasksAcrossDates(dates);
+  const grandTotal  = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
+  const workedDays  = Object.values(dayMap).filter(v => v.totalMs > 0).length;
+  const totalSess   = Object.values(dayMap).reduce((a, v) => a + v.sessionCount, 0);
+  const dailyAvg    = workedDays > 0 ? Math.round(grandTotal / workedDays) : 0;
+
+  y = _pdfSummaryBox(doc, y,
+    `Total: ${formatDurationShort(grandTotal)}`,
+    `${workedDays}/7 days worked`,
+    `Avg/day: ${workedDays > 0 ? formatDurationShort(dailyAvg) : '—'}`);
+
+  // ── Day-by-day bar chart ───────────────────────────────────────────────────
+  y = _pdfSectionTitle(doc, y, 'DAY-BY-DAY BREAKDOWN');
+  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const maxMs    = Math.max(...Object.values(dayMap).map(v => v.totalMs), 1);
+  const barMaxW  = pageW - margin * 2 - 50;
+
+  dates.forEach((d, i) => {
+    checkPage(10);
+    const v     = dayMap[d];
+    const label = `${dayNames[i]}  ${new Date(d + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
+    const barW  = v.totalMs > 0 ? Math.max((v.totalMs / maxMs) * barMaxW, 3) : 0;
+
+    // Label — plain style for all days, no today highlight
     doc.setTextColor(60, 60, 60);
-    doc.setFontSize(10);
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'normal');
+    doc.text(label, margin, y + 5);
+
+    // Bar track
+    const barX = margin + 32;
+    doc.setFillColor(240, 240, 248);
+    doc.roundedRect(barX, y + 1, barMaxW, 5, 1, 1, 'F');
+
+    // Bar fill
+    if (barW > 0) {
+      doc.setFillColor(124, 106, 247);
+      doc.roundedRect(barX, y + 1, barW, 5, 1, 1, 'F');
+    }
+
+    // Duration text
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(60, 60, 60);
-    doc.text(`Total Work Time: ${formatDurationShort(grandTotal)}`, margin + 6, y + 8);
-    doc.text(`Tasks: ${Object.keys(taskMap).length}`, pageW / 2, y + 8, { align: 'center' });
-    doc.text(`Sessions: ${sessions.length}`, pageW - margin - 6, y + 8, { align: 'right' });
-    y += 18;
+    doc.setFontSize(8);
+    doc.setTextColor(v.totalMs > 0 ? 80 : 180, v.totalMs > 0 ? 60 : 180, v.totalMs > 0 ? 180 : 180);
+    doc.text(v.totalMs > 0 ? formatDurationShort(v.totalMs) : '—', barX + barMaxW + 3, y + 5.5);
 
-    // ── Table header
+    y += 10;
+  });
+
+  y += 4;
+
+  // Build flat rows: one row per (task, date) pair
+  const taskDateRows = [];
+  dates.forEach(d => {
+    const daySessions = state.sessions.filter(s => s.date === d);
+    const taskMapDay  = {};
+    daySessions.forEach(s => {
+      if (!taskMapDay[s.taskId]) taskMapDay[s.taskId] = { name: s.taskName, totalMs: 0 };
+      taskMapDay[s.taskId].totalMs += s.duration;
+    });
+    Object.values(taskMapDay).forEach(t => {
+      taskDateRows.push({
+        name: t.name,
+        date: new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }),
+        totalMs: t.totalMs,
+      });
+    });
+  });
+
+  if (taskDateRows.length === 0) {
+    doc.setTextColor(180, 180, 180);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text('No sessions recorded this week.', margin + 4, y + 6);
+    y += 14;
+  } else {
+    // Table header (solid purple, matches daily style)
     doc.setFillColor(124, 106, 247);
     doc.rect(margin, y, pageW - margin * 2, 8, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    const cols = [margin + 3, 90, 120, 148, 172];
-    doc.text('TASK', cols[0], y + 5.5);
-    doc.text('SESSIONS', cols[1], y + 5.5);
-    doc.text('START', cols[2], y + 5.5);
-    doc.text('END', cols[3], y + 5.5);
-    doc.text('DURATION', cols[4], y + 5.5);
+    const tcols = [margin + 3, 120, 165];
+    doc.text('TASK',     tcols[0], y + 5.5);
+    doc.text('DATE',     tcols[1], y + 5.5);
+    doc.text('DURATION', tcols[2], y + 5.5);
     y += 8;
 
-    // ── Table rows
-    let rowIndex = 0;
-    Object.values(taskMap).forEach(data => {
-      checkPage(10);
-      if (rowIndex % 2 === 0) {
+    taskDateRows.forEach((row, i) => {
+      checkPage(9);
+      if (i % 2 === 0) {
         doc.setFillColor(248, 248, 252);
         doc.rect(margin, y, pageW - margin * 2, 9, 'F');
       }
-      const first = data.sessions[0];
-      const last = data.sessions[data.sessions.length - 1];
       doc.setTextColor(30, 30, 30);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
-      doc.text(data.name, cols[0], y + 6);
+      doc.text(doc.splitTextToSize(row.name, tcols[1] - tcols[0] - 4)[0], tcols[0], y + 6);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor(80, 80, 80);
-      doc.text(String(data.sessions.length), cols[1], y + 6);
-      doc.text(first ? formatTime(first.startTime) : '-', cols[2], y + 6);
-      doc.text(last?.endTime ? formatTime(last.endTime) : 'Running', cols[3], y + 6);
+      doc.text(row.date, tcols[1], y + 6);
       doc.setTextColor(100, 80, 220);
       doc.setFont('helvetica', 'bold');
-      doc.text(formatDurationShort(data.totalMs), cols[4], y + 6);
+      doc.text(formatDurationShort(row.totalMs), tcols[2], y + 6);
       y += 9;
-      rowIndex++;
     });
-
-    // ── Footer line
-    y += 6;
-    checkPage(12);
-    doc.setDrawColor(200, 200, 200);
-    doc.line(margin, y, pageW - margin, y);
-    y += 8;
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Generated by WorkTracker', margin, y);
-    doc.text(`Page 1`, pageW - margin, y, { align: 'right' });
-
-    const pdfContent = doc.output('arraybuffer');
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(pdfContent)));
-    const filepath = await api.exportReport({ content: base64, filename: `worktracker-report-${dateStr}.pdf`, isPdf: true, folder: 'Reports' });
-    showNotif(`PDF saved: ${filepath}`, 'success');
   }
+
+  _pdfFooter(doc);
+  const base64   = btoa(String.fromCharCode(...new Uint8Array(doc.output('arraybuffer'))));
+  const filepath = await api.exportReport({ content: base64, filename: `worktracker-weekly-${fileSlug}.pdf`, isPdf: true, folder: 'Reports' });
+  showNotif(`PDF saved: ${filepath}`, 'success');
+}
+
+// ── Monthly export ────────────────────────────────────────────────────────────
+async function _exportReportMonthly(format) {
+  const dates     = getMonthDates(reportMonthOffset);
+  const ref       = new Date(dates[0] + 'T00:00:00');
+  const monthName = ref.toLocaleDateString([], { month: 'long', year: 'numeric' });
+  const fileSlug  = `${ref.getFullYear()}-${String(ref.getMonth() + 1).padStart(2, '0')}`;
+
+  if (format === 'txt') {
+    const content  = generateReportTextMonthly();
+    const filepath = await api.exportReport({ content, filename: `worktracker-monthly-${fileSlug}.txt`, folder: 'Reports' });
+    showNotif(`Report saved: ${filepath}`, 'success');
+    return;
+  }
+
+  // PDF
+  const { jsPDF } = window.jspdf;
+  const doc    = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW  = doc.internal.pageSize.getWidth();
+  const pageH  = doc.internal.pageSize.getHeight();
+  const margin = 20;
+  let y = margin;
+
+  const checkPage = (needed = 10) => {
+    if (y + needed > pageH - margin - 16) { doc.addPage(); y = margin; }
+  };
+
+  _pdfHeader(doc, 'WorkTracker Monthly Report', monthName);
+  y = 38;
+
+  doc.setTextColor(100, 100, 100);
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Generated: ${new Date().toLocaleString()}`, margin, y);
+  y += 10;
+
+  const dayMap      = aggregateDates(dates);
+  const taskSummary = aggregateTasksAcrossDates(dates);
+  const grandTotal  = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
+  const workedDays  = Object.values(dayMap).filter(v => v.totalMs > 0).length;
+  const totalSess   = Object.values(dayMap).reduce((a, v) => a + v.sessionCount, 0);
+  const dailyAvg    = workedDays > 0 ? Math.round(grandTotal / workedDays) : 0;
+
+  y = _pdfSummaryBox(doc, y,
+    `Total: ${formatDurationShort(grandTotal)}`,
+    `${workedDays}/${dates.length} days worked`,
+    `Avg/day: ${workedDays > 0 ? formatDurationShort(dailyAvg) : '—'}`);
+
+  // ── Day-by-day bar chart (worked days only) ────────────────────────────────
+  y = _pdfSectionTitle(doc, y, 'DAY-BY-DAY BREAKDOWN (worked days only)');
+
+  const maxMs   = Math.max(...Object.values(dayMap).map(v => v.totalMs), 1);
+  const barMaxW = pageW - margin * 2 - 55;
+
+  const workedEntries = dates.filter(d => dayMap[d].totalMs > 0);
+  if (workedEntries.length === 0) {
+    doc.setTextColor(180, 180, 180);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text('No sessions recorded this month.', margin + 4, y + 6);
+    y += 14;
+  } else {
+    workedEntries.forEach(d => {
+      checkPage(10);
+      const v     = dayMap[d];
+      const label = new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+      const barW  = Math.max((v.totalMs / maxMs) * barMaxW, 3);
+
+      // Plain style — no today highlight
+      doc.setTextColor(60, 60, 60);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.text(label, margin, y + 5);
+
+      const barX = margin + 36;
+      doc.setFillColor(240, 240, 248);
+      doc.roundedRect(barX, y + 1, barMaxW, 5, 1, 1, 'F');
+      doc.setFillColor(124, 106, 247);
+      doc.roundedRect(barX, y + 1, barW, 5, 1, 1, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(80, 60, 180);
+      doc.text(formatDurationShort(v.totalMs), barX + barMaxW + 3, y + 5.5);
+
+      y += 10;
+    });
+  }
+
+  y += 4;
+
+  // Build flat rows: one row per (task, date) pair
+  const taskDateRows = [];
+  dates.forEach(d => {
+    const daySessions = state.sessions.filter(s => s.date === d);
+    const taskMapDay  = {};
+    daySessions.forEach(s => {
+      if (!taskMapDay[s.taskId]) taskMapDay[s.taskId] = { name: s.taskName, totalMs: 0 };
+      taskMapDay[s.taskId].totalMs += s.duration;
+    });
+    Object.values(taskMapDay).forEach(t => {
+      taskDateRows.push({
+        name: t.name,
+        date: new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }),
+        totalMs: t.totalMs,
+      });
+    });
+  });
+
+  if (taskDateRows.length === 0) {
+    doc.setTextColor(180, 180, 180);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text('No sessions recorded this month.', margin + 4, y + 6);
+    y += 14;
+  } else {
+    // Table header (solid purple, matches daily/weekly style)
+    doc.setFillColor(124, 106, 247);
+    doc.rect(margin, y, pageW - margin * 2, 8, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    const tcols = [margin + 3, 120, 165];
+    doc.text('TASK',     tcols[0], y + 5.5);
+    doc.text('DATE',     tcols[1], y + 5.5);
+    doc.text('DURATION', tcols[2], y + 5.5);
+    y += 8;
+
+    taskDateRows.forEach((row, i) => {
+      checkPage(9);
+      if (i % 2 === 0) {
+        doc.setFillColor(248, 248, 252);
+        doc.rect(margin, y, pageW - margin * 2, 9, 'F');
+      }
+      doc.setTextColor(30, 30, 30);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text(doc.splitTextToSize(row.name, tcols[1] - tcols[0] - 4)[0], tcols[0], y + 6);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(80, 80, 80);
+      doc.text(row.date, tcols[1], y + 6);
+      doc.setTextColor(100, 80, 220);
+      doc.setFont('helvetica', 'bold');
+      doc.text(formatDurationShort(row.totalMs), tcols[2], y + 6);
+      y += 9;
+    });
+  }
+
+  _pdfFooter(doc);
+  const base64   = btoa(String.fromCharCode(...new Uint8Array(doc.output('arraybuffer'))));
+  const filepath = await api.exportReport({ content: base64, filename: `worktracker-monthly-${fileSlug}.pdf`, isPdf: true, folder: 'Reports' });
+  showNotif(`PDF saved: ${filepath}`, 'success');
 }
 
 // ── Holidays API ──────────────────────────────────────────────────────────────
@@ -2061,6 +2846,18 @@ async function init() {
     hideConfirm();
   });
 
+  // Edit modal
+  document.getElementById('edit-modal-close').addEventListener('click', hideEditModal);
+  document.getElementById('btn-edit-modal-cancel').addEventListener('click', hideEditModal);
+  document.getElementById('btn-edit-modal-save').addEventListener('click', saveEditTask);
+  document.getElementById('edit-modal-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'edit-modal-overlay') hideEditModal();
+  });
+  document.getElementById('edit-task-name').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') saveEditTask();
+    if (e.key === 'Escape') hideEditModal();
+  });
+
   // Active timer controls
   document.getElementById('btn-pause-active').addEventListener('click', () => {
     if (state.activeTaskId) pauseTask(state.activeTaskId);
@@ -2094,6 +2891,31 @@ async function init() {
   // Report date picker
   document.getElementById('report-date').addEventListener('change', (e) => {
     renderReport(e.target.value);
+  });
+
+  // Report view dropdown
+  document.getElementById('report-view-select').addEventListener('change', (e) => {
+    switchReportView(e.target.value);
+  });
+
+  // Week nav
+  document.getElementById('btn-week-prev').addEventListener('click', () => {
+    reportWeekOffset--;
+    renderReportWeekly();
+  });
+  document.getElementById('btn-week-next').addEventListener('click', () => {
+    reportWeekOffset++;
+    renderReportWeekly();
+  });
+
+  // Month nav
+  document.getElementById('btn-month-prev').addEventListener('click', () => {
+    reportMonthOffset--;
+    renderReportMonthly();
+  });
+  document.getElementById('btn-month-next').addEventListener('click', () => {
+    reportMonthOffset++;
+    renderReportMonthly();
   });
 
   // Export report
