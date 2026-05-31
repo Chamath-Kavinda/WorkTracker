@@ -45,6 +45,7 @@ function saveSettings(settings) {
 let mainWindow;
 let tray;
 let _trayTickInterval = null;
+let overlayWindow = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -70,6 +71,31 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => { mainWindow.show(); });
   mainWindow.on('close', (e) => { e.preventDefault(); mainWindow.hide(); });
+}
+
+function createOverlayWindow() {
+  const { screen } = require('electron');
+  const display = screen.getPrimaryDisplay();
+  const { width, height } = display.workAreaSize; // workArea excludes taskbar
+
+  overlayWindow = new BrowserWindow({
+    width: 280,   // wider to fit full task name
+    height: 52,   // taller for bigger font
+    x: width - 290,   // 10px from right edge
+    y: height - 62,   // 10px above taskbar
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    focusable: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  overlayWindow.loadFile('overlay.html');
 }
 
 function createTray() {
@@ -350,12 +376,15 @@ ipcMain.handle('google-sign-in', async () => {
 ipcMain.handle('set-active-timer', (_, { taskName, startedAt }) => {
   if (_trayTickInterval) { clearInterval(_trayTickInterval); _trayTickInterval = null; }
 
-  if (!taskName) {
+  if (!taskName || !_trayTimerEnabled) {
     tray.setToolTip('WorkTracker');
+    mainWindow.setTitle('WorkTracker');
+    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide();
     return true;
   }
 
-  let toggle = false;
+  if (!overlayWindow || overlayWindow.isDestroyed()) createOverlayWindow();
+  overlayWindow.show();
 
   const tick = () => {
     const elapsed = Math.floor((Date.now() - startedAt) / 1000);
@@ -363,20 +392,49 @@ ipcMain.handle('set-active-timer', (_, { taskName, startedAt }) => {
     const m = Math.floor((elapsed % 3600) / 60);
     const s = elapsed % 60;
     const hms = h > 0
-      ? `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`
+      ? `${h}h ${String(m).padStart(2, '0')}m`
       : `${m}m ${String(s).padStart(2, '0')}s`;
+    const label = taskName;
 
-    const label = taskName.length > 28 ? taskName.slice(0, 25) + '…' : taskName;
+    tray.setToolTip(`▶ ${label} — ${hms}`);
+    mainWindow.setTitle(`WorkTracker ▶ ${label} ${hms}`);
 
-    // Alternate between a regular space and non-breaking space to trick Windows
-    // into seeing a "new" string every tick without any visual difference
-    const pad = toggle ? ' ' : '\u00A0';
-    toggle = !toggle;
-
-    tray.setToolTip(`▶ ${label} — ${hms}${pad}`);
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.executeJavaScript(`
+        document.getElementById('task').textContent = ${JSON.stringify('▶ ' + label)};
+        document.getElementById('time').textContent = ${JSON.stringify(hms)};
+      `).catch(() => { });
+    }
   };
 
   tick();
   _trayTickInterval = setInterval(tick, 1000);
+  return true;
+});
+
+let _trayTimerEnabled = true; // default on, can be toggled via settings
+ipcMain.handle('set-tray-timer-enabled', (_, enabled) => {
+  _trayTimerEnabled = enabled;
+  if (!enabled) {
+    if (_trayTickInterval) { clearInterval(_trayTickInterval); _trayTickInterval = null; }
+    tray.setToolTip('WorkTracker');
+    mainWindow.setTitle('WorkTracker');
+    // Hide overlay immediately
+    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide();
+  } else {
+    // If a timer is currently running, restart the overlay
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.executeJavaScript(`
+        if (state.activeTaskId && state.activeSessionStart) {
+          const task = state.tasks.find(t => t.id === state.activeTaskId);
+          const existingMs = state.sessions
+            .filter(s => s.taskId === state.activeTaskId)
+            .reduce((a, s) => a + s.duration, 0);
+          const virtualStart = state.activeSessionStart - existingMs;
+          if (api.setActiveTimer) api.setActiveTimer({ taskName: task?.name, startedAt: virtualStart });
+        }
+      `).catch(() => { });
+    }
+  }
   return true;
 });

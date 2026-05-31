@@ -621,7 +621,7 @@ function startTask(taskId) {
 
 function pauseTask(taskId) {
   if (state.activeTaskId !== taskId) return;
-  stopCurrentSession(false);
+  stopCurrentSession(false); // this already calls setActiveTimer null
   renderAll();
   const task = state.tasks.find(t => t.id === taskId);
   showNotif(`Paused: ${task?.name}`, 'info');
@@ -663,6 +663,7 @@ function stopCurrentSession(markCompleted) {
   state.activeTaskId = null;
   state.activeSessionStart = null;
 
+  // In stopCurrentSession(), after state.activeTaskId = null:
   if (api.setActiveTimer) api.setActiveTimer({ taskName: null, startedAt: null });
 
   clearInterval(state.timerInterval);
@@ -2104,7 +2105,6 @@ function switchPage(page) {
   if (page === 'calendar') renderCalendar().catch(console.error);
 }
 
-// ── Settings ─────────────────────────────────────────────────────────────────
 async function loadSettings() {
   const settings = await api.loadSettings();
   document.getElementById('toggle-startup').checked = settings.startWithWindows || false;
@@ -2122,6 +2122,19 @@ async function loadSettings() {
     settings.readNotifIds.forEach(id => _readNotifIds.add(id));
   }
 
+  // Tray timer toggle
+  const trayTimerEnabled = settings.trayTimerEnabled === true;
+  document.getElementById('toggle-tray-timer').checked = trayTimerEnabled;
+  if (api.setTrayTimerEnabled) api.setTrayTimerEnabled(trayTimerEnabled);
+
+  document.getElementById('toggle-tray-timer').addEventListener('change', async (e) => {
+    const settings = await api.loadSettings();
+    settings.trayTimerEnabled = e.target.checked;
+    await api.saveSettings(settings);
+    if (api.setTrayTimerEnabled) api.setTrayTimerEnabled(e.target.checked);
+    showNotif(`Tray timer ${e.target.checked ? 'enabled' : 'disabled'}`, 'info');
+  });
+
   document.getElementById('select-country').addEventListener('change', async (e) => {
     selectedCountry = e.target.value;
     const settings = await api.loadSettings();
@@ -2129,7 +2142,7 @@ async function loadSettings() {
     await api.saveSettings(settings);
     const tz = COUNTRY_TIMEZONE[e.target.value] || 'system default';
     showNotif(`Timezone set to ${e.target.options[e.target.selectedIndex].text} (${tz})`, 'info');
-    renderAll(); // re-render everything with new timezone
+    renderAll();
     if (state.currentPage === 'calendar') renderCalendar().catch(console.error);
   });
 }

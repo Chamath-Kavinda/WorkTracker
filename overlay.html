@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: transparent;
+    font-family: 'Segoe UI', sans-serif;
+    -webkit-app-region: drag;
+    user-select: none;
+    overflow: hidden;
+  }
+  .widget {
+    display: inline-flex;
+    flex-direction: column;
+    background: rgba(15, 15, 25, 0.92);
+    border: 1px solid #7c6af750;
+    border-left: 3px solid #7c6af7;
+    border-radius: 8px;
+    padding: 6px 14px;
+    min-width: 220px;
+    max-width: 320px;
+  }
+  #task {
+    font-size: 12px;
+    color: #e0e0f0;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #time {
+    font-size: 15px;
+    color: #a78bfa;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+  }
+</style>
+</head>
+<body>
+  <div class="widget">
+    <div id="task">▶ Loading...</div>
+    <div id="time">0m 00s</div>
+  </div>
+</body>
+</html>
