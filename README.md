@@ -13,7 +13,7 @@
    npm install
    npm run build
    ```
-3. Find your installer at: `dist/WorkTracker Setup 5.2.1.exe`
+3. Find your installer at: `dist/WorkTracker Setup 5.5.3.exe`
 
 ## What you get
 - `.exe` NSIS installer for Windows 10/11
@@ -48,6 +48,11 @@
 - ✅ Export any project as .txt or styled .pdf report
 - ✅ Projects visible on Dashboard for quick access
 - ✅ Click any Dashboard project to open its board directly
+- ✅ **Drag-to-reorder task cards** within a version column
+- ✅ **Drag tasks across versions** — drop a task card onto any unlocked version column to move it
+- ✅ Locked versions cannot receive dropped tasks
+- ✅ **Drag-to-reorder version columns** — grab the grip handle (⠿) in the version header and drag left or right to reorder
+- ✅ Version column order is persisted and reflected in PDF/txt exports
 
 ### Report
 - ✅ Daily, Weekly, and Monthly report views
@@ -110,6 +115,14 @@
 - ✅ Day Streak counts consecutive calendar days with at least one work session
 - ✅ Today's tasks shown; past-day tasks shown with 🔒 Locked badge (no delete on dashboard)
 - ✅ Projects section with quick-access cards
+
+### PDF Export (Project Plans)
+- ✅ Versions exported in the same order as the board columns
+- ✅ Tasks exported in the same order as the column cards
+- ✅ Version status accurately shown: **RELEASED** / **FAILED TO RELEASE** / **FINISHED** / Due date
+- ✅ Released versions shown with green header bar
+- ✅ Failed-to-release versions shown with red header bar
+- ✅ Locked versions marked with **[LOCKED]** suffix in the version name
 
 ## Data Location
 All data is stored at: `%AppData%\worktracker\`  
