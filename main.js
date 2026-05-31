@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, shell, powerMonitor } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -67,7 +67,8 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
-  //mainWindow.webContents.openDevTools();
+  // mainWindow.webContents.openDevTools(); // DEV-ONLY: comment out in production
+  mainWindow.webContents.openDevTools(); 
 
   mainWindow.once('ready-to-show', () => { mainWindow.show(); });
   mainWindow.on('close', (e) => { e.preventDefault(); mainWindow.hide(); });
@@ -446,3 +447,26 @@ ipcMain.handle('get-app-info', () => {
     author: typeof pkg.author === 'object' ? pkg.author.name : pkg.author,
   };
 });
+
+// ── Idle Detection ────────────────────────────────────────────────────────────
+// Poll system idle time every 15 s and push events to the renderer.
+// The renderer is responsible for comparing against the user's threshold.
+ipcMain.handle('get-system-idle-time', () => {
+  try { return powerMonitor.getSystemIdleTime(); }
+  catch { return 0; }
+});
+
+let _idlePollInterval = null;
+
+function startIdlePoll() {
+  if (_idlePollInterval) return;
+  _idlePollInterval = setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try {
+      const idleSecs = powerMonitor.getSystemIdleTime();
+      mainWindow.webContents.send('idle-tick', idleSecs);
+    } catch { /* ignore */ }
+  }, 5_000); // every 5 s is fine — threshold minimum is 3 min
+}
+
+app.whenReady().then(() => startIdlePoll());

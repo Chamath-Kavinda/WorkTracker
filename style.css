@@ -295,6 +295,73 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 
 .active-timer-controls { display: flex; gap: 10px; }
 
+/* ── Idle warning state — amber tint on card border ── */
+.active-timer-card.idle-warning {
+  border-color: #f59e0b80;
+  background: linear-gradient(135deg, #f59e0b08, #22d3ee05);
+}
+.active-timer-card.idle-warning::before {
+  background: linear-gradient(90deg, transparent, #f59e0b, transparent);
+}
+
+/* Warning badge inline next to CURRENTLY TRACKING */
+.idle-warning-inline {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-left: 10px;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  color: #f59e0b;
+  background: #f59e0b15; border: 1px solid #f59e0b40;
+  border-radius: 5px; padding: 2px 8px;
+  animation: idle-badge-pulse 3s ease-in-out infinite;
+}
+#idle-warn-countdown {
+  color: #fbbf24; font-size: 11px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+@keyframes idle-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.65; }
+}
+
+/* ── Full idle state — card turns orange, timer still running ── */
+.active-timer-card.idle-active {
+  background: linear-gradient(135deg, #f59e0b22, #f59e0b0a) !important;
+  border-color: #f59e0b !important;
+  box-shadow: 0 0 32px #f59e0b28, 0 0 0 1px #f59e0b40;
+  animation: idle-card-pulse 2.5s ease-in-out infinite;
+}
+@keyframes idle-card-pulse {
+  0%, 100% { box-shadow: 0 0 32px #f59e0b28, 0 0 0 1px #f59e0b40; }
+  50%       { box-shadow: 0 0 48px #f59e0b45, 0 0 0 1px #f59e0b80; }
+}
+.active-timer-card.idle-active::before {
+  background: linear-gradient(90deg, transparent, #f59e0b, transparent) !important;
+  opacity: 1 !important;
+}
+.active-timer-card.idle-active .active-timer-display {
+  color: #f59e0b90;
+  text-shadow: 0 0 20px #f59e0b40;
+}
+.active-timer-card.idle-active .active-timer-name {
+  color: #f59e0b70;
+}
+
+/* Idle full-box message */
+.idle-full-box {
+  display: flex; flex-direction: column; align-items: flex-start;
+  gap: 3px; margin-bottom: 8px;
+}
+.idle-full-icon { font-size: 22px; margin-bottom: 3px; }
+.idle-full-text {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+  letter-spacing: 0.12em; color: #f59e0b;
+  text-transform: uppercase;
+  animation: idle-badge-pulse 2s ease-in-out infinite;
+}
+.idle-full-sub {
+  font-size: 12px; color: #f59e0b90;
+}
+
 .timer-ctrl-btn {
   display: flex; align-items: center; gap: 8px;
   padding: 9px 18px; border-radius: 8px; border: 1px solid;

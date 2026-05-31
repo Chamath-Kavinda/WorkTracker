@@ -20,4 +20,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
   // Google OAuth via main-process BrowserWindow
   googleSignIn: () => ipcRenderer.invoke('google-sign-in'),
+
+  // Idle detection
+  getSystemIdleTime: () => ipcRenderer.invoke('get-system-idle-time'),
+  onIdleTick: (cb) => ipcRenderer.on('idle-tick', (_, secs) => cb(secs)),
+  offIdleTick: () => ipcRenderer.removeAllListeners('idle-tick'),
 });

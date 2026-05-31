@@ -454,6 +454,139 @@ let state = {
 };
 let selectedCountry = 'LK';
 
+// ── Idle Detection ────────────────────────────────────────────────────────────
+const _idle = {
+  state: 'active',       // 'active' | 'warning' | 'idle'
+  pausedTaskId: null,
+  idleStartedAt: null,
+  thresholdSecs: 0,
+  warningTriggeredAt: 0, // idleSecs when warning started (60 s before threshold)
+  countdownTimer: null,
+  countdownValue: 0,
+};
+
+// How many idle seconds before showing the warning countdown
+const IDLE_WARN_AFTER_SECS = 60;
+
+function _fmtCountdown(secs) {
+  const s = Math.max(0, Math.round(secs));
+  const m = Math.floor(s / 60);
+  const ss = s % 60;
+  return m > 0 ? `${m}:${String(ss).padStart(2, '0')}` : `${ss}s`;
+}
+
+function _setCardIdleState(mode, countdownSecs) {
+  const card  = document.getElementById('active-timer-card');
+  const label = document.getElementById('active-timer-label');
+  const warn  = document.getElementById('idle-warning-inline');
+  const idleBox = document.getElementById('idle-full-box');
+  if (!card) return;
+
+  if (mode === 'active') {
+    card.classList.remove('idle-warning', 'idle-active');
+    if (warn)    { warn.style.display = 'none'; }
+    if (idleBox) { idleBox.style.display = 'none'; }
+    if (label)   { label.style.display = 'flex'; }
+
+  } else if (mode === 'warning') {
+    card.classList.add('idle-warning');
+    card.classList.remove('idle-active');
+    if (warn) {
+      warn.style.display = 'inline-flex';
+      document.getElementById('idle-warn-countdown').textContent = _fmtCountdown(countdownSecs);
+    }
+    if (idleBox) { idleBox.style.display = 'none'; }
+    if (label)   { label.style.display = 'flex'; }
+
+  } else if (mode === 'idle') {
+    card.classList.add('idle-active');
+    card.classList.remove('idle-warning');
+    if (warn)    { warn.style.display = 'none'; }
+    if (idleBox) { idleBox.style.display = 'flex'; }
+    if (label)   { label.style.display = 'flex'; }  // keep label visible — timer still running
+  }
+}
+
+function _startWarningCountdown(secsRemaining) {
+  _idle.countdownValue = secsRemaining;
+  _setCardIdleState('warning', secsRemaining);
+
+  if (_idle.countdownTimer) { clearInterval(_idle.countdownTimer); }
+  _idle.countdownTimer = setInterval(() => {
+    _idle.countdownValue--;
+    const cd = document.getElementById('idle-warn-countdown');
+    if (cd) cd.textContent = _fmtCountdown(_idle.countdownValue);
+
+    if (_idle.countdownValue <= 0) {
+      clearInterval(_idle.countdownTimer);
+      _idle.countdownTimer = null;
+      // Pause the timer — but keep the card visible and orange
+      _idle.state = 'idle';
+      _idle.pausedTaskId = state.activeTaskId;
+      _idle.idleStartedAt = Date.now();
+      _setCardIdleState('idle');
+      if (state.activeTaskId) {
+        stopCurrentSession(false);
+        renderAll();
+      }
+    }
+  }, 1000);
+}
+
+function _clearCountdown() {
+  if (_idle.countdownTimer) { clearInterval(_idle.countdownTimer); _idle.countdownTimer = null; }
+}
+
+function _initIdleDetection(thresholdMins) {
+  if (api.offIdleTick) api.offIdleTick();
+  _clearCountdown();
+  _setCardIdleState('active');
+  _idle.state = 'active';
+  _idle.thresholdSecs = (thresholdMins || 0) * 60;
+  if (!_idle.thresholdSecs || !api.onIdleTick) return;
+
+  api.onIdleTick((idleSecs) => {
+    const threshold = _idle.thresholdSecs;
+    if (!threshold) return;
+
+    //console.log(`[idle] ${idleSecs}s — state:${_idle.state} | threshold:${threshold}s`);
+
+    if (_idle.state === 'active') {
+      // Show warning after 60s idle, OR immediately if threshold ≤ 60s
+      const warnAfter = Math.min(IDLE_WARN_AFTER_SECS, Math.floor(threshold * 0.5));
+      if (idleSecs >= warnAfter) {
+        if (!state.activeTaskId || !state.activeSessionStart) return;
+        _idle.state = 'warning';
+        // Countdown = remaining time from NOW until threshold is reached
+        const secsRemaining = threshold - idleSecs;
+        _startWarningCountdown(Math.max(1, secsRemaining));
+      }
+
+    } else if (_idle.state === 'warning') {
+      // User came back — cancel
+      if (idleSecs < 15) {
+        _idle.state = 'active';
+        _clearCountdown();
+        _setCardIdleState('active');
+        showNotif('Still tracking ✅', 'info');
+      }
+
+    } else if (_idle.state === 'idle') {
+      // Mouse moved — auto-resume
+      if (idleSecs < 5) {
+        _idle.state = 'active';
+        _setCardIdleState('active');
+        const taskId = _idle.pausedTaskId;
+        _idle.pausedTaskId = null;
+        if (taskId) {
+          startTask(taskId);
+          showNotif('Welcome back — timer resumed ▶', 'success');
+        }
+      }
+    }
+  });
+}
+
 // IANA timezone for each country in the settings dropdown
 const COUNTRY_TIMEZONE = {
   LK: 'Asia/Colombo',
@@ -795,7 +928,17 @@ function renderActiveTimerCard() {
   const nameEl = document.getElementById('active-timer-name');
   const displayEl = document.getElementById('active-timer-display');
 
+  // While in idle state, keep card visible showing the paused task
   if (!state.activeTaskId) {
+    if (_idle.state === 'idle' && _idle.pausedTaskId) {
+      const task = state.tasks.find(t => t.id === _idle.pausedTaskId);
+      if (task) {
+        card.style.display = 'block';
+        nameEl.textContent = `${getCategoryEmoji(task.category)} ${task.name}`;
+        displayEl.textContent = formatDuration(getTaskTotalMs(task.id));
+        return;
+      }
+    }
     card.style.display = 'none';
     return;
   }
@@ -2149,6 +2292,20 @@ async function loadSettings() {
     showNotif(`Timezone set to ${e.target.options[e.target.selectedIndex].text} (${tz})`, 'info');
     renderAll();
     if (state.currentPage === 'calendar') renderCalendar().catch(console.error);
+  });
+
+  // Idle detection threshold
+  const idleThreshold = settings.idleThresholdMins || 0;
+  document.getElementById('select-idle-threshold').value = String(idleThreshold);
+  _initIdleDetection(idleThreshold);
+
+  document.getElementById('select-idle-threshold').addEventListener('change', async (e) => {
+    const mins = parseInt(e.target.value, 10) || 0;
+    const settings = await api.loadSettings();
+    settings.idleThresholdMins = mins;
+    await api.saveSettings(settings);
+    _initIdleDetection(mins);
+    showNotif(mins ? `Idle auto-pause set to ${mins} min${mins !== 1 ? 's' : ''}` : 'Idle detection disabled', 'info');
   });
 }
 
