@@ -40,6 +40,21 @@ function _applyState(data) {
   plannerState.projects = data.projects || [];
   plannerState.versions = data.versions || [];
   plannerState.plannerTasks = data.plannerTasks || [];
+  // Sync appOpenTime from cloud back to local settings if it is for today
+  if (data.appOpenDate && data.appOpenTime) {
+    api.loadSettings().then(settings => {
+      const today = todayStr ? todayStr() : new Date().toISOString().slice(0,10);
+      if (data.appOpenDate === today) {
+        const cloudOpen = new Date(data.appOpenTime).getTime();
+        const localOpen = settings.appOpenTime ? new Date(settings.appOpenTime).getTime() : Infinity;
+        if (cloudOpen < localOpen || settings.appOpenDate !== today) {
+          settings.appOpenDate = today;
+          settings.appOpenTime = data.appOpenTime;
+          api.saveSettings(settings).catch(() => {});
+        }
+      }
+    }).catch(() => {});
+  }
 }
 
 // Merge local + cloud by id union — no duplicates, nothing lost
@@ -706,12 +721,23 @@ async function loadData() {
 }
 
 async function saveData() {
+  // Persist appOpenTime in the cloud payload so it syncs across devices
+  let appOpenMeta = {};
+  try {
+    const settings = await api.loadSettings();
+    const today = todayStr();
+    if (settings.appOpenDate === today && settings.appOpenTime) {
+      appOpenMeta = { appOpenDate: today, appOpenTime: settings.appOpenTime };
+    }
+  } catch (e) { /* ignore */ }
+
   const payload = {
     tasks: state.tasks,
     sessions: state.sessions,
     projects: plannerState.projects,
     versions: plannerState.versions,
     plannerTasks: plannerState.plannerTasks,
+    ...appOpenMeta,
   };
   if (currentUser && fbDb) {
     // Logged in — save to cloud only (local store stays empty for security)
@@ -1842,6 +1868,18 @@ function renderReport(dateStr) {
     <div class="report-total-value">${formatDurationShort(grandTotal)}</div>
   `;
 
+  // ── Show table OR chart based on current mode ─────────────────────────────
+  const tableWrapper = document.getElementById('report-table').closest('.report-table-wrapper');
+  const dailyChartEl = document.getElementById('report-daily-chart');
+
+  if (reportChartMode === 'chart') {
+    if (tableWrapper) tableWrapper.style.display = 'none';
+    if (dailyChartEl) dailyChartEl.innerHTML = tasks.length > 0 ? renderDailyBarChart(taskMap, grandTotal) : '';
+  } else {
+    if (tableWrapper) tableWrapper.style.display = '';
+    if (dailyChartEl) dailyChartEl.innerHTML = '';
+  }
+
   // Summary cards
   const summaryEl = document.getElementById('report-summary');
   summaryEl.innerHTML = `
@@ -1874,23 +1912,68 @@ function renderReport(dateStr) {
     </div>
   `;
 
-  // Wake time calculation
-  if (api.getAppStartTime) {
-    api.getAppStartTime().then(appStart => {
-      const diffMs = Date.now() - new Date(appStart);
+  // ── App Open Time (persisted daily via settings) ──────────────────────────
+  (async () => {
+    const settings = await api.loadSettings();
+    const today = todayStr();
+    // Reset if stored date is not today, otherwise keep the original open time
+    if (settings.appOpenDate !== today) {
+      settings.appOpenDate = today;
+      settings.appOpenTime = new Date().toISOString();
+      await api.saveSettings(settings);
+    }
+    const openTime = new Date(settings.appOpenTime);
+    const updateWake = () => {
+      const diffMs = Date.now() - openTime;
       const diffMins = Math.floor(diffMs / 60000);
       const hours = Math.floor(diffMins / 60);
       const mins = diffMins % 60;
       const wakeEl = document.getElementById('wake-time-value');
       if (wakeEl) wakeEl.textContent = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
-    });
-  }
+    };
+    updateWake();
+    // Update every minute while on report page
+    if (!window._wakeInterval) {
+      window._wakeInterval = setInterval(updateWake, 60000);
+    }
+  })();
 }
 
 // ── Report view state ─────────────────────────────────────────────────────────
 let reportView = 'daily'; // 'daily' | 'weekly' | 'monthly'
 let reportWeekOffset = 0;  // 0 = current week, -1 = last week, etc.
 let reportMonthOffset = 0; // 0 = current month
+let reportChartMode = 'chart'; // 'list' | 'chart'
+
+function setReportChartMode(mode) {
+  reportChartMode = mode;
+  const listBtn = document.getElementById('btn-report-list');
+  const chartBtn = document.getElementById('btn-report-chart');
+  if (listBtn && chartBtn) {
+    listBtn.style.background = mode === 'list' ? '#7c6af7' : 'transparent';
+    listBtn.style.color = mode === 'list' ? '#fff' : '#7c6af7';
+    listBtn.style.boxShadow = mode === 'list' ? '0 2px 10px #7c6af740' : 'none';
+    chartBtn.style.background = mode === 'chart' ? '#7c6af7' : 'transparent';
+    chartBtn.style.color = mode === 'chart' ? '#fff' : '#7c6af7';
+    chartBtn.style.boxShadow = mode === 'chart' ? '0 2px 10px #7c6af740' : 'none';
+  }
+  if (reportView === 'daily') {
+    const tableWrapper = document.getElementById('report-table').closest('.report-table-wrapper');
+    const dailyChart = document.getElementById('report-daily-chart');
+    if (mode === 'chart') {
+      tableWrapper.style.display = 'none';
+      renderReport(document.getElementById('report-date').value);
+    } else {
+      tableWrapper.style.display = '';
+      if (dailyChart) dailyChart.innerHTML = '';
+      renderReport(document.getElementById('report-date').value);
+    }
+  } else if (reportView === 'weekly') {
+    renderReportWeekly();
+  } else if (reportView === 'monthly') {
+    renderReportMonthly();
+  }
+}
 
 // Returns array of YYYY-MM-DD strings for the Mon–Sun week at weekOffset from today
 function getWeekDates(weekOffset) {
@@ -1958,6 +2041,202 @@ function aggregateTasksAcrossDates(dates) {
   return Object.values(taskMap)
     .sort((a, b) => b.totalMs - a.totalMs)
     .map(t => ({ ...t, daysWorked: t.daysWorked.size }));
+}
+
+function renderBarChartHTML(dates, dayMap, maxMs, labelFn) {
+  const todayDate = todayStr();
+  const isMonthly = dates.length > 7;
+
+  const MAX_MS = 8 * 60 * 60 * 1000;
+  const CHART_H = 180;
+
+  const shortLabel = (d) => {
+    const dt = new Date(d + 'T00:00:00');
+    return isMonthly
+      ? dt.toLocaleDateString([], { day: 'numeric' })
+      : labelFn(d).split('  ')[0];
+  };
+
+  // Y-axis grid lines at 0h, 2h, 4h, 6h, 8h
+  const gridLines = [8, 6, 4, 2, 0].map(h => {
+    const bottomPct = (h / 8) * 100;
+    return `
+      <div style="position:absolute;left:0;right:0;bottom:${bottomPct}%;
+                  border-top:1px dashed ${h === 8 ? '#ffffff25' : '#ffffff10'};pointer-events:none;">
+        <span style="position:absolute;left:-22px;top:-8px;
+                     font-size:9px;font-weight:600;color:#ffffff40;
+                     line-height:1;text-align:right;width:20px;">${h > 0 ? h + 'h' : ''}</span>
+      </div>`;
+  }).join('');
+
+  const bars = dates.map(d => {
+    const v = dayMap[d];
+    const isToday = d === todayDate;
+    const isWeekend = (() => { const day = new Date(d + 'T00:00:00').getDay(); return day === 0 || day === 6; })();
+    const rawPct = Math.min((v.totalMs / MAX_MS) * 100, 100);
+    const heightPx = v.totalMs > 0 ? Math.max((rawPct / 100) * CHART_H, 4) : 0;
+    const dur = v.totalMs > 0 ? formatDurationShort(v.totalMs) : '';
+    const overMax = v.totalMs > MAX_MS;
+
+    let barBg, barGlow;
+    if (isToday)        { barBg = 'linear-gradient(180deg,#c4b5fd 0%,#7c6af7 100%)'; barGlow = '#a78bfa'; }
+    else if (overMax)   { barBg = 'linear-gradient(180deg,#f59e0b 0%,#d97706 100%)'; barGlow = '#f59e0b'; }
+    else if (v.totalMs > 0) { barBg = 'linear-gradient(180deg,#9d8df9 0%,#5b4fd4 100%)'; barGlow = '#7c6af7'; }
+    else                { barBg = 'none'; barGlow = 'none'; }
+
+    const labelColor = isToday ? '#a78bfa' : (isWeekend ? '#6b7280' : '#9ca3af');
+
+    return `
+      <div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;"
+           title="${shortLabel(d)}${dur ? ': ' + dur : ': no work'}">
+        <!-- fixed-height bar track, bar grows from bottom via absolute positioning -->
+        <div style="width:100%;height:${CHART_H}px;position:relative;">
+          ${v.totalMs > 0 ? `
+            <!-- duration label above bar -->
+            ${!isMonthly ? `<div style="position:absolute;bottom:${heightPx + 4}px;left:50%;transform:translateX(-50%);
+                        font-size:10px;font-weight:700;color:#e2d9fb;white-space:nowrap;
+                        pointer-events:none;">${dur}</div>` : ''}
+            <!-- the bar itself, anchored to bottom -->
+            <div style="position:absolute;bottom:0;left:2px;right:2px;height:${heightPx}px;
+                        background:${barBg};
+                        border-radius:${isMonthly ? '3px' : '5px'} ${isMonthly ? '3px' : '5px'} 2px 2px;
+                        box-shadow:0 -3px 12px ${barGlow}55;
+                        transition:height .5s cubic-bezier(.4,0,.2,1);"></div>
+          ` : `
+            <!-- empty day: tiny baseline tick -->
+            <div style="position:absolute;bottom:0;left:2px;right:2px;height:2px;
+                        background:#ffffff08;border-radius:1px;"></div>
+          `}
+        </div>
+        <!-- date label -->
+        <div style="font-size:${isMonthly ? '9px' : '11px'};font-weight:${isToday ? '700' : '500'};
+                    color:${labelColor};white-space:nowrap;text-align:center;width:100%;
+                    padding-top:5px;margin-top:1px;
+                    border-top:2px solid ${isToday ? '#7c6af7' : '#ffffff10'};">
+          ${shortLabel(d)}
+        </div>
+        ${isMonthly && v.totalMs > 0 ? `
+        <div style="font-size:8px;font-weight:600;color:#a78bfa;white-space:nowrap;
+                    margin-top:2px;text-align:center;">${dur}</div>` : ''}
+      </div>`;
+  }).join('');
+
+  const anyOverMax = Object.values(dayMap).some(v => v.totalMs > MAX_MS);
+
+  return `
+    <div style="background:#0f0f18;border:1px solid #ffffff0f;border-radius:14px;
+                padding:24px 20px 16px 20px;margin-bottom:8px;">
+      <!-- Header row -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <span style="font-size:11px;font-weight:600;color:#ffffff35;letter-spacing:.05em;text-transform:uppercase;">Hours / Day</span>
+        <div style="display:flex;align-items:center;gap:10px;">
+          ${anyOverMax ? `<span style="font-size:10px;font-weight:700;color:#f59e0b;">⚡ Some days exceed 8h</span>` : ''}
+          <span style="font-size:10px;font-weight:600;color:#ffffff30;letter-spacing:.04em;">MAX 8h / day</span>
+        </div>
+      </div>
+      <!-- Chart: y-axis labels + bars -->
+      <div style="display:flex;gap:0;">
+        <!-- Y-axis label column -->
+        <div style="position:relative;width:24px;flex-shrink:0;height:${CHART_H}px;">
+          ${gridLines}
+        </div>
+        <!-- Bars + gridlines overlay -->
+        <div style="flex:1;position:relative;">
+          <!-- Gridlines painted behind bars -->
+          <div style="position:absolute;inset:0;height:${CHART_H}px;pointer-events:none;">
+            ${[8,6,4,2,0].map(h => {
+              const bp = (h/8)*100;
+              return `<div style="position:absolute;left:0;right:0;bottom:${bp}%;
+                                  border-top:1px dashed ${h===8?'#ffffff22':'#ffffff0d'};"></div>`;
+            }).join('')}
+          </div>
+          <!-- Bars row -->
+          <div style="display:flex;gap:${isMonthly ? '2px' : '6px'};position:relative;z-index:1;">
+            ${bars}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── Daily horizontal bar chart ────────────────────────────────────────────────
+function renderDailyBarChart(taskMap, grandTotal) {
+  if (Object.keys(taskMap).length === 0) return '';
+  const MAX_MS = 8 * 60 * 60 * 1000;
+  const entries = Object.values(taskMap).sort((a, b) => b.totalMs - a.totalMs);
+
+  const rows = entries.map(t => {
+    const pct = Math.min((t.totalMs / MAX_MS) * 100, 100);
+    const sharePct = grandTotal > 0 ? ((t.totalMs / grandTotal) * 100).toFixed(1) : '0.0';
+    const dur = formatDurationShort(t.totalMs);
+    return `
+      <div style="display:flex;align-items:center;gap:12px;padding:8px 0;
+                  border-bottom:1px solid #ffffff07;">
+        <!-- Task name -->
+        <div style="width:180px;flex-shrink:0;font-size:13px;font-weight:600;
+                    color:#e2d9fb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+             title="${t.name}">${t.name}</div>
+        <!-- Bar track -->
+        <div style="flex:1;height:10px;background:#ffffff08;border-radius:5px;overflow:visible;position:relative;">
+          <div style="position:absolute;left:0;top:0;height:100%;width:${pct}%;
+                      background:linear-gradient(90deg,#5b4fd4,#9d8df9);
+                      border-radius:5px;
+                      box-shadow:0 0 8px #7c6af755;
+                      transition:width .5s cubic-bezier(.4,0,.2,1);"></div>
+        </div>
+        <!-- Duration -->
+        <div style="width:54px;flex-shrink:0;font-size:12px;font-weight:700;
+                    color:#a78bfa;text-align:right;font-variant-numeric:tabular-nums;">${dur}</div>
+        <!-- Share -->
+        <div style="width:38px;flex-shrink:0;font-size:11px;color:#ffffff40;text-align:right;">${sharePct}%</div>
+      </div>`;
+  }).join('');
+
+  // 8h reference marker position
+  const refPct = Math.min((grandTotal / MAX_MS) * 100, 100);
+
+  return `
+    <div style="background:#0f0f18;border:1px solid #ffffff0f;border-radius:14px;
+                padding:20px 20px 8px;margin-top:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <span style="font-size:11px;font-weight:700;color:#ffffff35;letter-spacing:.06em;text-transform:uppercase;">
+          Task Breakdown
+        </span>
+        <div style="display:flex;align-items:center;gap:16px;">
+          <span style="font-size:11px;color:#7c6af7;font-weight:700;">
+            Total: ${formatDurationShort(grandTotal)}
+          </span>
+          <span style="font-size:10px;color:#ffffff30;">MAX 8h / day</span>
+        </div>
+      </div>
+      <!-- Overall day progress bar -->
+      <div style="margin-bottom:16px;">
+        <div style="height:6px;background:#ffffff08;border-radius:3px;overflow:hidden;position:relative;">
+          <div style="height:100%;width:${refPct}%;
+                      background:linear-gradient(90deg,#7c6af7,#a78bfa);
+                      border-radius:3px;box-shadow:0 0 10px #7c6af760;"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:4px;">
+          <span style="font-size:9px;color:#ffffff30;">0h</span>
+          <span style="font-size:9px;color:#ffffff30;">2h</span>
+          <span style="font-size:9px;color:#ffffff30;">4h</span>
+          <span style="font-size:9px;color:#ffffff30;">6h</span>
+          <span style="font-size:9px;color:#ffffff30;">8h</span>
+        </div>
+      </div>
+      <!-- Per-task rows -->
+      <div style="display:flex;flex-direction:column;">
+        <div style="display:flex;align-items:center;gap:12px;padding-bottom:6px;
+                    border-bottom:1px solid #ffffff12;margin-bottom:2px;">
+          <div style="width:180px;flex-shrink:0;font-size:10px;font-weight:700;
+                      color:#ffffff30;letter-spacing:.05em;text-transform:uppercase;">Task</div>
+          <div style="flex:1;font-size:10px;font-weight:700;color:#ffffff30;letter-spacing:.05em;text-transform:uppercase;">Progress (vs 8h)</div>
+          <div style="width:54px;flex-shrink:0;font-size:10px;font-weight:700;color:#ffffff30;text-align:right;">Time</div>
+          <div style="width:38px;flex-shrink:0;font-size:10px;font-weight:700;color:#ffffff30;text-align:right;">Share</div>
+        </div>
+        ${rows}
+      </div>
+    </div>`;
 }
 
 function renderReportSummaryView(dates, labelFn, grandTotalLabel) {
@@ -2060,7 +2339,8 @@ function renderReportSummaryView(dates, labelFn, grandTotalLabel) {
       </table>`;
 
   sv.innerHTML = `
-    <div class="summary-period-grid">${rowsHtml}</div>
+    <div class="summary-period-grid">${reportChartMode === 'chart' ? '' : rowsHtml}</div>
+    ${reportChartMode === 'chart' ? renderBarChartHTML(dates, dayMap, maxMs, labelFn) : ''}
     <div style="margin-top:20px">
       <div style="font-size:12px;font-weight:700;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;">Task Breakdown</div>
       <div class="report-table-wrapper" style="margin-bottom:0">${topTasksHtml}</div>
@@ -2115,23 +2395,41 @@ function renderReportMonthly() {
 
 function switchReportView(view) {
   reportView = view;
-  // Sync dropdown
   const sel = document.getElementById('report-view-select');
   if (sel) sel.value = view;
-  // Show/hide controls
   document.getElementById('report-date').style.display = view === 'daily' ? '' : 'none';
   document.getElementById('report-week-nav').style.display = view === 'weekly' ? 'flex' : 'none';
   document.getElementById('report-month-nav').style.display = view === 'monthly' ? 'flex' : 'none';
+  // Show toggle for ALL views
+  const chartToggle = document.getElementById('report-chart-toggle');
+  if (chartToggle) chartToggle.style.display = 'flex';
 
   if (view === 'daily') {
-    // Restore daily view
-    document.getElementById('report-table').closest('.report-table-wrapper').style.display = '';
     document.getElementById('report-summary-view').style.display = 'none';
-    renderReport(document.getElementById('report-date').value);
+    applyDailyChartMode();
   } else if (view === 'weekly') {
+    const dc = document.getElementById('report-daily-chart');
+    if (dc) dc.innerHTML = '';
     renderReportWeekly();
   } else {
+    const dc = document.getElementById('report-daily-chart');
+    if (dc) dc.innerHTML = '';
     renderReportMonthly();
+  }
+}
+
+// Apply current reportChartMode to daily view without re-reading data
+function applyDailyChartMode() {
+  const tableWrapper = document.getElementById('report-table').closest('.report-table-wrapper');
+  const dailyChart = document.getElementById('report-daily-chart');
+  if (reportChartMode === 'chart') {
+    tableWrapper.style.display = 'none';
+    // Re-render the daily chart (data already in DOM via renderReport)
+    renderReport(document.getElementById('report-date').value);
+  } else {
+    tableWrapper.style.display = '';
+    if (dailyChart) dailyChart.innerHTML = '';
+    renderReport(document.getElementById('report-date').value);
   }
 }
 
@@ -2372,6 +2670,9 @@ function switchPage(page) {
   document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
 
   if (page === 'report') {
+    // Always show the List/Chart toggle on the report page
+    const chartToggle = document.getElementById('report-chart-toggle');
+    if (chartToggle) chartToggle.style.display = 'flex';
     if (reportView === 'daily') renderReport();
     else if (reportView === 'weekly') renderReportWeekly();
     else renderReportMonthly();

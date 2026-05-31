@@ -776,11 +776,13 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 
 /* Date picker */
 .date-picker {
-  padding: 9px 13px; background: var(--bg-card); border: 1px solid var(--border);
+  padding: 9px 8px 9px 13px; background: var(--bg-card); border: 1px solid var(--border);
   border-radius: 8px; color: var(--text-primary); font-family: var(--font-ui); font-size: 13px;
   cursor: pointer;
 }
 .date-picker:focus { outline: none; border-color: var(--border-active); }
+.date-picker::-webkit-calendar-picker-indicator { opacity: 0; width: 0; position: absolute; pointer-events: none; }
+.date-picker::-webkit-inner-spin-button { display: none; }
 
 /* ── Notifications ── */
 .notification {
@@ -1275,9 +1277,6 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
 .planner-task-item .planner-task-name {
   display: flex;
   align-items: center;
-}
-#planner-version-duedate::-webkit-calendar-picker-indicator {
-  display: none;
 }
 .planner-task-item.done {
   background: #10b98112;
