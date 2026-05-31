@@ -4,18 +4,18 @@ const api = window.electronAPI;
 
 // ── Firebase Auth ─────────────────────────────────────────────────────────────
 let fbAuth = null;
-let fbDb   = null;
+let fbDb = null;
 let currentUser = null;
 let _firestoreUnsubscribe = null; // real-time listener handle
 
 // Hardcoded Firebase config (no settings UI needed)
 const FIREBASE_CONFIG = {
-  apiKey:            "AIzaSyBbH6td0Q4eTa4JXLDhoMk8gfNpS1m5INQ",
-  authDomain:        "worktracker-29228.firebaseapp.com",
-  projectId:         "worktracker-29228",
-  storageBucket:     "worktracker-29228.firebasestorage.app",
+  apiKey: "AIzaSyBbH6td0Q4eTa4JXLDhoMk8gfNpS1m5INQ",
+  authDomain: "worktracker-29228.firebaseapp.com",
+  projectId: "worktracker-29228",
+  storageBucket: "worktracker-29228.firebasestorage.app",
   messagingSenderId: "482821840009",
-  appId:             "1:482821840009:web:9ce9490b49639367713a58",
+  appId: "1:482821840009:web:9ce9490b49639367713a58",
 };
 
 // ── Sync helpers ──────────────────────────────────────────────────────────────
@@ -23,8 +23,8 @@ const FIREBASE_CONFIG = {
 // Returns true if the data payload has any meaningful content
 function _hasData(data) {
   return !!(data.tasks?.length || data.sessions?.length ||
-            data.projects?.length || data.versions?.length ||
-            data.plannerTasks?.length);
+    data.projects?.length || data.versions?.length ||
+    data.plannerTasks?.length);
 }
 
 // Wipe the local electron store
@@ -36,11 +36,11 @@ async function _clearLocalData() {
 
 // Apply a data payload to in-memory state
 function _applyState(data) {
-  state.tasks               = data.tasks         || [];
-  state.sessions            = data.sessions       || [];
-  plannerState.projects     = data.projects       || [];
-  plannerState.versions     = data.versions       || [];
-  plannerState.plannerTasks = data.plannerTasks   || [];
+  state.tasks = data.tasks || [];
+  state.sessions = data.sessions || [];
+  plannerState.projects = data.projects || [];
+  plannerState.versions = data.versions || [];
+  plannerState.plannerTasks = data.plannerTasks || [];
 }
 
 // Merge local + cloud by id union — no duplicates, nothing lost
@@ -51,10 +51,10 @@ function _mergeData(local, cloud) {
     return Object.values(map);
   };
   return {
-    tasks:        mergeArr(local.tasks,        cloud.tasks),
-    sessions:     mergeArr(local.sessions,     cloud.sessions),
-    projects:     mergeArr(local.projects,     cloud.projects),
-    versions:     mergeArr(local.versions,     cloud.versions),
+    tasks: mergeArr(local.tasks, cloud.tasks),
+    sessions: mergeArr(local.sessions, cloud.sessions),
+    projects: mergeArr(local.projects, cloud.projects),
+    versions: mergeArr(local.versions, cloud.versions),
     plannerTasks: mergeArr(local.plannerTasks, cloud.plannerTasks),
   };
 }
@@ -64,7 +64,7 @@ async function initFirebase() {
   try {
     if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     fbAuth = firebase.auth();
-    fbDb   = firebase.firestore();
+    fbDb = firebase.firestore();
 
     fbAuth.onAuthStateChanged(async user => {
       currentUser = user;
@@ -77,7 +77,7 @@ async function initFirebase() {
         // ── SIGNED IN ──────────────────────────────────────────────────────────
         // 1. Read whatever is in local store (saved while logged out)
         const localData = await api.loadData();
-        const hasLocal  = _hasData(localData);
+        const hasLocal = _hasData(localData);
 
         // 2. Read this account's cloud data
         let cloudData = null;
@@ -175,7 +175,7 @@ async function signInWithGoogle() {
 
     if (result && (result.accessToken || result.idToken)) {
       const credential = firebase.auth.GoogleAuthProvider.credential(
-        result.idToken    || null,
+        result.idToken || null,
         result.accessToken || null
       );
       await fbAuth.signInWithCredential(credential);
@@ -282,7 +282,7 @@ function showSignOutConfirm() {
 
   document.body.appendChild(overlay);
 
-  overlay.querySelector('#signout-cancel-btn').onclick  = () => overlay.remove();
+  overlay.querySelector('#signout-cancel-btn').onclick = () => overlay.remove();
   overlay.querySelector('#signout-confirm-btn').onclick = async () => {
     overlay.remove();
     // onAuthStateChanged handles clearing state + local store automatically
@@ -295,14 +295,14 @@ function showSignOutConfirm() {
 
 function friendlyAuthError(code) {
   const map = {
-    'auth/invalid-email':          'Invalid email address.',
-    'auth/user-not-found':         'No account found with this email.',
-    'auth/wrong-password':         'Incorrect password.',
-    'auth/invalid-credential':     'Incorrect email or password.',
-    'auth/email-already-in-use':   'This email is already registered.',
-    'auth/weak-password':          'Password must be at least 6 characters.',
-    'auth/too-many-requests':      'Too many attempts. Please try again later.',
-    'auth/popup-closed-by-user':   'Sign-in popup was closed.',
+    'auth/invalid-email': 'Invalid email address.',
+    'auth/user-not-found': 'No account found with this email.',
+    'auth/wrong-password': 'Incorrect password.',
+    'auth/invalid-credential': 'Incorrect email or password.',
+    'auth/email-already-in-use': 'This email is already registered.',
+    'auth/weak-password': 'Password must be at least 6 characters.',
+    'auth/too-many-requests': 'Too many attempts. Please try again later.',
+    'auth/popup-closed-by-user': 'Sign-in popup was closed.',
     'auth/network-request-failed': 'Network error. Check your connection.',
   };
   return map[code] || 'Sign-in failed. Please try again.';
@@ -328,12 +328,12 @@ function hideAuthModal() {
 function setAuthModeUI(mode) {
   authMode = mode;
   const reg = mode === 'register';
-  document.getElementById('auth-modal-title').textContent    = reg ? 'Create account' : 'Welcome back';
+  document.getElementById('auth-modal-title').textContent = reg ? 'Create account' : 'Welcome back';
   document.getElementById('auth-modal-subtitle').textContent = reg ? 'Join WorkTracker today' : 'Sign in to sync your data';
-  document.getElementById('auth-submit-label').textContent   = reg ? 'Create Account' : 'Sign In';
-  document.getElementById('auth-toggle-text').textContent    = reg ? 'Already have an account?' : "Don't have an account?";
-  document.getElementById('btn-auth-toggle').textContent     = reg ? 'Sign In' : 'Register';
-  document.getElementById('auth-name-field').style.display   = reg ? '' : 'none';
+  document.getElementById('auth-submit-label').textContent = reg ? 'Create Account' : 'Sign In';
+  document.getElementById('auth-toggle-text').textContent = reg ? 'Already have an account?' : "Don't have an account?";
+  document.getElementById('btn-auth-toggle').textContent = reg ? 'Sign In' : 'Register';
+  document.getElementById('auth-name-field').style.display = reg ? '' : 'none';
   clearAuthError();
 }
 
@@ -358,11 +358,11 @@ function setAuthLoading(on) {
 }
 
 function updateAuthUI(user) {
-  const profile  = document.getElementById('auth-profile');
+  const profile = document.getElementById('auth-profile');
   const signInBtn = document.getElementById('btn-signin-titlebar');
   // Settings page panels
   const settingsOut = document.getElementById('settings-account-signed-out');
-  const settingsIn  = document.getElementById('settings-account-signed-in');
+  const settingsIn = document.getElementById('settings-account-signed-in');
 
   const bellBtn = document.getElementById('notif-bell-btn');
   if (user) {
@@ -414,18 +414,18 @@ function initAuthUI() {
 
   // Submit
   document.getElementById('btn-auth-submit').addEventListener('click', async () => {
-    const email    = document.getElementById('auth-email').value.trim();
+    const email = document.getElementById('auth-email').value.trim();
     const password = document.getElementById('auth-password').value;
-    const name     = document.getElementById('auth-displayname').value.trim();
+    const name = document.getElementById('auth-displayname').value.trim();
     clearAuthError();
-    if (!email)    { showAuthError('Please enter your email.');    return; }
+    if (!email) { showAuthError('Please enter your email.'); return; }
     if (!password) { showAuthError('Please enter your password.'); return; }
     if (authMode === 'register') await registerWithEmail(email, password, name);
-    else                         await signInWithEmail(email, password);
+    else await signInWithEmail(email, password);
   });
 
   // Enter key
-  ['auth-email','auth-password','auth-displayname'].forEach(id => {
+  ['auth-email', 'auth-password', 'auth-displayname'].forEach(id => {
     document.getElementById(id)?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') document.getElementById('btn-auth-submit').click();
     });
@@ -562,10 +562,10 @@ async function loadData() {
   }
   if (!data) data = await api.loadData();
 
-  state.tasks    = data.tasks    || [];
+  state.tasks = data.tasks || [];
   state.sessions = data.sessions || [];
-  plannerState.projects     = data.projects     || [];
-  plannerState.versions     = data.versions     || [];
+  plannerState.projects = data.projects || [];
+  plannerState.versions = data.versions || [];
   plannerState.plannerTasks = data.plannerTasks || [];
 }
 
@@ -678,7 +678,7 @@ function checkMidnightAutoComplete() {
   if (!state.activeTaskId || !state.activeSessionStart) return;
 
   const startDate = localDateStr(new Date(state.activeSessionStart)); // user-timezone date
-  const today     = todayStr();
+  const today = todayStr();
 
   if (startDate === today) return; // same day, nothing to do
 
@@ -802,7 +802,7 @@ function createTaskCard(task, options = {}) {
   const isRunning = status === 'running';
 
   // A task is "locked" if it belongs to a past date (cannot be started/paused/stopped)
-  const taskDate = task.date || task.createdAt?.slice(0,10) || todayStr();
+  const taskDate = task.date || task.createdAt?.slice(0, 10) || todayStr();
   const isPastDay = taskDate < todayStr() && !isRunning;
 
   const div = document.createElement('div');
@@ -927,9 +927,11 @@ function renderTasksPage() {
   list.innerHTML = '';
 
   // ── Render category filter chips ──────────────────────────────────────────
-  const CATEGORIES = ['all','work','meeting','design','development','research','admin','other'];
-  const CAT_LABELS  = { all:'All Categories', work:'💼 Work', meeting:'🗣️ Meeting', design:'🎨 Design',
-                        development:'💻 Development', research:'🔍 Research', admin:'📋 Admin', other:'📌 Other' };
+  const CATEGORIES = ['all', 'work', 'meeting', 'design', 'development', 'research', 'admin', 'other'];
+  const CAT_LABELS = {
+    all: 'All Categories', work: '💼 Work', meeting: '🗣️ Meeting', design: '🎨 Design',
+    development: '💻 Development', research: '🔍 Research', admin: '📋 Admin', other: '📌 Other'
+  };
 
   const catBar = document.getElementById('tasks-category-bar');
   if (catBar) {
@@ -950,8 +952,8 @@ function renderTasksPage() {
   if (state.currentFilter !== 'all') {
     tasks = tasks.filter(t => {
       const status = getTaskStatus(t);
-      if (state.currentFilter === 'active')    return status === 'running';
-      if (state.currentFilter === 'paused')    return status === 'paused';
+      if (state.currentFilter === 'active') return status === 'running';
+      if (state.currentFilter === 'paused') return status === 'paused';
       if (state.currentFilter === 'completed') return status === 'completed';
       return true;
     });
@@ -971,12 +973,12 @@ function renderTasksPage() {
   }
 
   // ── Group by date (newest first) ──────────────────────────────────────────
-  const today    = todayStr();
+  const today = todayStr();
   const yesterday = localDateStr(new Date(Date.now() - 864e5));
 
   const groups = {};
   tasks.forEach(task => {
-    const key = task.date || task.createdAt?.slice(0,10) || today;
+    const key = task.date || task.createdAt?.slice(0, 10) || today;
     if (!groups[key]) groups[key] = [];
     groups[key].push(task);
   });
@@ -986,9 +988,9 @@ function renderTasksPage() {
   sortedDates.forEach(date => {
     // Date header
     let label;
-    if (date === today)     label = `Today <span class="date-group-sub">${formatDateFull(date)}</span>`;
+    if (date === today) label = `Today <span class="date-group-sub">${formatDateFull(date)}</span>`;
     else if (date === yesterday) label = `Yesterday <span class="date-group-sub">${formatDateFull(date)}</span>`;
-    else                    label = formatDateFull(date);
+    else label = formatDateFull(date);
 
     const header = document.createElement('div');
     header.className = 'date-group-header';
@@ -1034,11 +1036,6 @@ function updateDashboardStats() {
 function calcDayStreak() {
   const datesWithWork = new Set(state.sessions.map(s => s.date));
   let streak = 0;
-  // Use a UTC timestamp and step back in exact 24-hour increments.
-  // localDateStr() then maps each timestamp to the correct calendar date
-  // in the user's chosen timezone via Intl.DateTimeFormat — so this is
-  // consistent with todayStr() and all other date calculations regardless
-  // of how the OS timezone differs from the user's selected country.
   let ts = Date.now();
   let checkingToday = true;
   while (true) {
@@ -1048,24 +1045,33 @@ function calcDayStreak() {
       streak++;
       checkingToday = false;
     } else {
-      // Allow skipping today if it has no sessions yet (day just started)
       if (checkingToday) {
         checkingToday = false;
-        ts -= 864e5; // step back exactly 24 hours
+        ts -= 864e5;
         continue;
       }
-      break; // gap found — streak ends
+      break;
     }
 
-    ts -= 864e5; // step back exactly 24 hours
-    if (streak > 3650) break; // safety cap (10 years)
+    ts -= 864e5;
+    if (streak > 3650) break;
   }
   return streak;
 }
 
 // ── Planner Version Notifications ─────────────────────────────────────────────
-// readNotifIds: set of version IDs the user has manually marked as read
+// readNotifIds: set of version IDs the user has manually marked as read.
+// Persisted to settings.json so the bell doesn't re-shake after a restart.
 const _readNotifIds = new Set();
+
+async function _saveReadNotifIds() {
+  try {
+    const settings = await api.loadSettings();
+    const validVersionIds = new Set(plannerState.versions.map(v => v.id));
+    settings.readNotifIds = [..._readNotifIds].filter(id => validVersionIds.has(id));
+    await api.saveSettings(settings);
+  } catch (e) { console.warn('Could not persist read-notif state:', e); }
+}
 
 function getVersionNotifications() {
   const notifications = [];
@@ -1080,11 +1086,11 @@ function getVersionNotifications() {
 
     const project = plannerState.projects.find(p => p.id === ver.projectId);
     const projectName = project?.name || 'Unknown Project';
-    const dueDate   = new Date(ver.dueDate + 'T00:00:00');
+    const dueDate = new Date(ver.dueDate + 'T00:00:00');
     const todayDate = new Date(today + 'T00:00:00');
-    const daysLeft  = Math.round((dueDate - todayDate) / (1000 * 60 * 60 * 24));
-    const doneCnt   = tasks.filter(t => t.done).length;
-    const totalCnt  = tasks.length;
+    const daysLeft = Math.round((dueDate - todayDate) / (1000 * 60 * 60 * 24));
+    const doneCnt = tasks.filter(t => t.done).length;
+    const totalCnt = tasks.length;
     const remaining = totalCnt - doneCnt;
 
     let urgency, icon, message;
@@ -1112,13 +1118,19 @@ function getVersionNotifications() {
       urgency, icon,
       title: `${projectName} · ${ver.name}`,
       message, daysLeft,
+      projectName,
+      projectId: ver.projectId,
       read: _readNotifIds.has(ver.id),
     });
   });
 
   // Any version that was unread and is now all-done → auto-clear from read set
   // (so if tasks change it shows fresh again)
-  notifications.sort((a, b) => a.daysLeft - b.daysLeft);
+  // Unread first, then most urgent (lowest daysLeft) within each group
+  notifications.sort((a, b) => {
+    if (a.read !== b.read) return a.read ? 1 : -1; // unread before read
+    return a.daysLeft - b.daysLeft;                 // most urgent first
+  });
   return notifications;
 }
 
@@ -1127,7 +1139,7 @@ function _buildNotifDropdown(notifs) {
   if (!dropdown) return;
 
   const unreadNotifs = notifs.filter(n => !n.read);
-  const hasUnread    = unreadNotifs.length > 0;
+  const hasUnread = unreadNotifs.length > 0;
 
   // Show first 3 inline, rest in "show more"
   const INLINE_LIMIT = 3;
@@ -1153,7 +1165,7 @@ function _buildNotifDropdown(notifs) {
     </div>`;
 
   const visibleItems = notifs.slice(0, INLINE_LIMIT);
-  const hiddenItems  = notifs.slice(INLINE_LIMIT);
+  const hiddenCount = notifs.length - INLINE_LIMIT;
 
   dropdown.innerHTML = `
     <div class="notif-dropdown-header">
@@ -1164,27 +1176,23 @@ function _buildNotifDropdown(notifs) {
       </div>
     </div>
     ${visibleItems.map(renderItem).join('')}
-    ${hiddenItems.length > 0 ? `
-      <div id="notif-show-more-bar" class="notif-show-more-bar">
-        <button id="notif-show-more-btn" class="notif-show-more-btn">
-          Show ${hiddenItems.length} more ▾
+    ${hiddenCount > 0 ? `
+      <div class="notif-show-more-bar">
+        <button class="notif-show-more-btn" id="notif-show-all-btn">
+          Show ${hiddenCount} more ▾
         </button>
-      </div>
-      <div id="notif-hidden-items" style="display:none">
-        ${hiddenItems.map(renderItem).join('')}
       </div>` : ''}`;
 
-  // Show more toggle
-  dropdown.querySelector('#notif-show-more-btn')?.addEventListener('click', () => {
-    const hidden = dropdown.querySelector('#notif-hidden-items');
-    const bar    = dropdown.querySelector('#notif-show-more-bar');
-    hidden.style.display = 'block';
-    bar.style.display    = 'none';
+  // Show all → open centered modal
+  dropdown.querySelector('#notif-show-all-btn')?.addEventListener('click', () => {
+    dropdown.style.display = 'none';
+    openNotifModal();
   });
 
   // Mark all read
   dropdown.querySelector('#notif-mark-all-read')?.addEventListener('click', () => {
     notifs.forEach(n => _readNotifIds.add(n.id));
+    _saveReadNotifIds();
     renderNotifBell();
   });
 
@@ -1193,6 +1201,7 @@ function _buildNotifDropdown(notifs) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       _readNotifIds.add(btn.dataset.readId);
+      _saveReadNotifIds();
       renderNotifBell();
     });
   });
@@ -1204,22 +1213,250 @@ function _buildNotifDropdown(notifs) {
   });
 }
 
+// ── All-Notifications Modal ────────────────────────────────────────────────────
+function openNotifModal() {
+  document.getElementById('notif-modal-overlay')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'notif-modal-overlay';
+  overlay.style.cssText = `
+    position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    animation:fadeIn .15s ease;
+  `;
+
+  const allNotifs = getVersionNotifications();
+  const projectMap = {};
+  allNotifs.forEach(n => { if (n.projectId) projectMap[n.projectId] = n.projectName; });
+  const projectOptions = Object.entries(projectMap)
+    .map(([id, name]) => `<option value="${id}">${name}</option>`)
+    .join('');
+
+  overlay.innerHTML = `
+    <div style="
+      background:#1a1a24;border:1px solid #ffffff14;border-radius:16px;
+      width:500px;max-width:92vw;max-height:78vh;display:flex;flex-direction:column;
+      box-shadow:0 24px 64px #00000090;animation:slideUp .2s ease;overflow:hidden;
+    ">
+      <div style="display:flex;align-items:center;justify-content:space-between;
+                  padding:16px 20px 14px;border-bottom:1px solid #ffffff0f;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:20px;">🔔</span>
+          <div>
+            <div style="font-size:15px;font-weight:700;color:#f0f0f5;">All Reminders</div>
+            <div style="font-size:11px;color:#55556a;margin-top:1px;" id="nmod-count-label"></div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button id="nmod-mark-all" style="
+            background:none;border:1px solid #ffffff14;border-radius:7px;
+            color:#7c6af7;font-size:11.5px;font-weight:600;padding:5px 10px;
+            cursor:pointer;transition:background .15s;display:none;">Mark all read</button>
+          <button id="nmod-close" style="
+            background:none;border:none;cursor:pointer;color:#55556a;
+            font-size:19px;line-height:1;padding:3px 7px;border-radius:6px;
+            transition:color .15s,background .15s;">✕</button>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 20px;
+                  border-bottom:1px solid #ffffff0f;flex-shrink:0;flex-wrap:wrap;">
+        <div style="display:flex;background:#0f0f17;border-radius:8px;padding:2px;gap:2px;" id="nmod-tabs">
+          <button class="nmod-tab" data-tab="all">All</button>
+          <button class="nmod-tab" data-tab="unread">Unread</button>
+          <button class="nmod-tab" data-tab="read">Read</button>
+        </div>
+        ${projectOptions ? `
+        <select id="nmod-project-filter" style="
+          flex:1;min-width:130px;background:#0f0f17;border:1px solid #ffffff12;
+          border-radius:8px;color:#f0f0f5;font-size:12px;padding:5px 10px;
+          cursor:pointer;outline:none;">
+          <option value="">All projects</option>
+          ${projectOptions}
+        </select>` : ''}
+      </div>
+      <div id="nmod-list" style="overflow-y:auto;flex:1;padding:4px 0;min-height:60px;"></div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+
+  function styleTab(btn, active) {
+    btn.style.cssText = `
+      background:${active ? '#7c6af720' : 'none'};border:none;cursor:pointer;
+      color:${active ? '#7c6af7' : '#8888aa'};font-size:11.5px;
+      font-weight:${active ? '700' : '500'};padding:4px 12px;
+      border-radius:6px;transition:all .15s;`;
+  }
+  overlay.querySelectorAll('.nmod-tab').forEach(t => styleTab(t, t.dataset.tab === 'all'));
+
+  let activeTab = 'all';
+  let activeProject = '';
+
+  function applyFilters() {
+    const notifs = getVersionNotifications();
+    let filtered = notifs;
+    if (activeTab === 'unread') filtered = filtered.filter(n => !n.read);
+    if (activeTab === 'read') filtered = filtered.filter(n => n.read);
+    if (activeProject) filtered = filtered.filter(n => n.projectId === activeProject);
+    renderModalList(filtered, notifs);
+  }
+
+  function renderModalList(filtered, allN) {
+    const list = document.getElementById('nmod-list');
+    const label = document.getElementById('nmod-count-label');
+    const markAllBtn = document.getElementById('nmod-mark-all');
+    if (!list) return;
+
+    const unreadAll = allN.filter(n => !n.read);
+    if (markAllBtn) markAllBtn.style.display = unreadAll.length > 0 ? '' : 'none';
+    if (label) {
+      const suffix = (activeTab !== 'all' || activeProject) ? ' (filtered)' : '';
+      label.textContent = `${filtered.length} reminder${filtered.length !== 1 ? 's' : ''}${suffix}`;
+    }
+
+    if (filtered.length === 0) {
+      const msgs = { read: '📭 No read notifications', unread: '✅ All caught up!', all: '✅ No reminders' };
+      list.innerHTML = `<div style="padding:44px 20px;text-align:center;color:#55556a;font-size:13px;">${msgs[activeTab]}</div>`;
+      return;
+    }
+
+    list.innerHTML = filtered.map(n => {
+      const urgencyBg = n.urgency === 'urgent' ? '#ef444415' : n.urgency === 'warning' ? '#f59e0b15' : '#7c6af715';
+      const badgeBg = n.urgency === 'urgent' ? '#ef444420' : '#f59e0b18';
+      const badgeColor = n.urgency === 'urgent' ? '#f87171' : '#fbbf24';
+      const badgeLabel = n.urgency === 'urgent'
+        ? (n.daysLeft <= 0 ? 'OVERDUE' : 'DUE TOMORROW')
+        : `${n.daysLeft}d LEFT`;
+      return `
+      <div class="nmod-item" data-id="${n.id}" style="
+        display:flex;align-items:flex-start;gap:12px;padding:12px 20px;
+        border-bottom:1px solid #ffffff06;cursor:default;transition:background .12s;
+        opacity:${n.read ? '.4' : '1'};
+      ">
+        <div style="width:36px;height:36px;border-radius:10px;flex-shrink:0;
+                    display:flex;align-items:center;justify-content:center;
+                    font-size:16px;background:${urgencyBg};">${n.icon}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:12.5px;font-weight:${n.read ? '400' : '700'};color:#f0f0f5;
+                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${n.title}</div>
+          <div style="font-size:11.5px;color:${n.read ? '#55556a' : '#8888aa'};
+                      margin-top:2px;line-height:1.4;">${n.message}</div>
+          <div style="margin-top:5px;display:flex;align-items:center;gap:6px;">
+            <span style="display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;
+                         border-radius:4px;background:${badgeBg};color:${badgeColor};">${badgeLabel}</span>
+            <span style="font-size:10px;color:#55556a;">${n.projectName}</span>
+          </div>
+        </div>
+        ${!n.read
+          ? `<button class="nmod-read-btn" data-read-id="${n.id}" title="Mark as read" style="
+               flex-shrink:0;background:none;border:1px solid #ffffff15;border-radius:7px;
+               cursor:pointer;color:#7c6af7;width:28px;height:28px;
+               display:flex;align-items:center;justify-content:center;
+               transition:background .15s;margin-top:2px;">
+               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                 <circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.3"/>
+                 <path d="M4.5 7l2 2 3-3" stroke="currentColor" stroke-width="1.4"
+                       stroke-linecap="round" stroke-linejoin="round"/>
+               </svg>
+             </button>`
+          : `<span style="color:#22c55e;font-size:13px;flex-shrink:0;padding:0 4px;margin-top:4px;">✓</span>`}
+      </div>`;
+    }).join('');
+
+    list.querySelectorAll('.nmod-item').forEach(row => {
+      row.addEventListener('mouseenter', () => { row.style.background = '#ffffff04'; });
+      row.addEventListener('mouseleave', () => { row.style.background = ''; });
+    });
+    list.querySelectorAll('.nmod-read-btn').forEach(btn => {
+      btn.addEventListener('mouseenter', () => { btn.style.background = '#7c6af715'; });
+      btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _readNotifIds.add(btn.dataset.readId);
+        _saveReadNotifIds();
+        renderNotifBell();
+        applyFilters();
+      });
+    });
+  }
+
+  overlay.querySelectorAll('.nmod-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      activeTab = tab.dataset.tab;
+      overlay.querySelectorAll('.nmod-tab').forEach(t => styleTab(t, t === tab));
+      applyFilters();
+    });
+  });
+
+  overlay.querySelector('#nmod-project-filter')?.addEventListener('change', (e) => {
+    activeProject = e.target.value;
+    applyFilters();
+  });
+
+  overlay.querySelector('#nmod-mark-all')?.addEventListener('click', () => {
+    getVersionNotifications().forEach(n => _readNotifIds.add(n.id));
+    _saveReadNotifIds();
+    renderNotifBell();
+    applyFilters();
+  });
+
+  const close = () => overlay.remove();
+  overlay.querySelector('#nmod-close').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', function onEsc(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); }
+  });
+
+  const closeBtn = overlay.querySelector('#nmod-close');
+  closeBtn.addEventListener('mouseenter', () => { closeBtn.style.color = '#f0f0f5'; closeBtn.style.background = '#ffffff10'; });
+  closeBtn.addEventListener('mouseleave', () => { closeBtn.style.color = '#55556a'; closeBtn.style.background = 'none'; });
+  const markAllBtn2 = overlay.querySelector('#nmod-mark-all');
+  if (markAllBtn2) {
+    markAllBtn2.addEventListener('mouseenter', () => { markAllBtn2.style.background = '#7c6af715'; });
+    markAllBtn2.addEventListener('mouseleave', () => { markAllBtn2.style.background = 'none'; });
+  }
+
+  applyFilters();
+}
+
 function renderNotifBell() {
-  const btn      = document.getElementById('notif-bell-btn');
-  const dot      = document.getElementById('notif-dot');
+  const btn = document.getElementById('notif-bell-btn');
+  const dot = document.getElementById('notif-dot');
   const dropdown = document.getElementById('notif-dropdown');
   if (!btn) return;
 
-  const notifs    = getVersionNotifications();
-  const unread    = notifs.filter(n => !n.read);
+  const notifs = getVersionNotifications();
+  const unread = notifs.filter(n => !n.read);
   const hasUnread = unread.length > 0;
-  const hasAny    = notifs.length > 0;
+  const wasActive = btn.classList.contains('has-notifs');
 
-  // Badge + bell color: only when there are UNREAD notifications
-  dot.style.display = hasUnread ? 'block' : 'none';
-  btn.classList.toggle('has-notifs', hasUnread);
+  // ── Badge (! dot) ─────────────────────────────────────────────────────────
+  if (hasUnread) {
+    // Force the pop animation to replay every time we show the badge by
+    // briefly removing the element from layout (void reflow trick).
+    dot.style.display = 'block';
+    dot.style.animation = 'none';
+    void dot.offsetWidth; // trigger reflow
+    dot.style.animation = '';
+  } else {
+    dot.style.display = 'none';
+  }
 
-  // Shake animation handled by CSS bell-shake-loop (5s repeat) when has-notifs class is present
+  // ── Bell shake ───────────────────────────────────────────────────────────
+  if (hasUnread) {
+    // If the class was already present the CSS animation is already running —
+    // no restart needed. Only restart when transitioning from no-notifs → notifs.
+    if (!wasActive) {
+      const icon = btn.querySelector('.notif-bell-icon');
+      if (icon) {
+        icon.style.animation = 'none';
+        void icon.offsetWidth;
+        icon.style.animation = '';
+      }
+    }
+    btn.classList.add('has-notifs');
+  } else {
+    btn.classList.remove('has-notifs');
+  }
 
   // Rebuild dropdown if it's currently open
   if (dropdown.style.display === 'block') {
@@ -1228,7 +1465,7 @@ function renderNotifBell() {
 }
 
 function initNotifBell() {
-  const btn      = document.getElementById('notif-bell-btn');
+  const btn = document.getElementById('notif-bell-btn');
   const dropdown = document.getElementById('notif-dropdown');
   if (!btn) return;
 
@@ -1466,6 +1703,11 @@ async function loadSettings() {
   if (settings.country) {
     selectedCountry = settings.country;
     document.getElementById('select-country').value = settings.country;
+  }
+
+  // Restore notification read state so the bell doesn't re-shake after restart
+  if (Array.isArray(settings.readNotifIds)) {
+    settings.readNotifIds.forEach(id => _readNotifIds.add(id));
   }
 
   document.getElementById('select-country').addEventListener('change', async (e) => {
@@ -1914,8 +2156,9 @@ document.addEventListener('DOMContentLoaded', init);
 // ── Planner ────────────────────────────────────────────────────────────────────
 
 const PLANNER_COLORS = [
-  '#7c6af7', '#22d3ee', '#10b981', '#f59e0b', '#ef4444',
-  '#ec4899', '#8b5cf6', '#06b6d4', '#14b8a6', '#f97316',
+  '#7c6af7', '#22d3ee', '#f59e0b', '#ef4444',
+  '#ec4899', '#f97316', '#06b6d4', '#0ea5e9',
+  '#e11d48', '#d946ef', 
 ];
 
 let plannerState = {
@@ -1956,11 +2199,11 @@ function getDueBadge(version) {
   }
 
   // Use local date arithmetic — never parse without T00:00:00 to avoid UTC offset issues
-  const due   = new Date(version.dueDate + 'T00:00:00');
+  const due = new Date(version.dueDate + 'T00:00:00');
   const today = new Date(); today.setHours(0, 0, 0, 0); due.setHours(0, 0, 0, 0);
-  const diff  = Math.round((due - today) / 86400000); // exact local days
+  const diff = Math.round((due - today) / 86400000); // exact local days
 
-  const tasks   = plannerState.plannerTasks.filter(t => t.versionId === version.id);
+  const tasks = plannerState.plannerTasks.filter(t => t.versionId === version.id);
   const allDone = tasks.length > 0 && tasks.every(t => t.done);
 
   if (diff < 0) {
@@ -1970,7 +2213,7 @@ function getDueBadge(version) {
   }
   if (diff === 0) return `<span class="version-due-badge today">🔥 Due Today · ${formatShortDate(version.dueDate)}</span>`;
   if (diff === 1) return `<span class="version-due-badge soon">⚡ 1d left · ${formatShortDate(version.dueDate)}</span>`;
-  if (diff <= 7)  return `<span class="version-due-badge soon">⚠ ${diff}d left · ${formatShortDate(version.dueDate)}</span>`;
+  if (diff <= 7) return `<span class="version-due-badge soon">⚠ ${diff}d left · ${formatShortDate(version.dueDate)}</span>`;
   return `<span class="version-due-badge ok">📅 ${formatShortDate(version.dueDate)}</span>`;
 }
 
@@ -2418,7 +2661,15 @@ async function exportProjectReport(projId, format) {
     const pageH = doc.internal.pageSize.getHeight();
     const margin = 18;
     let y = margin;
-    const checkPage = (needed = 10) => { if (y + needed > pageH - margin) { doc.addPage(); y = margin; } };
+    const checkPage = (needed = 10) => {
+      if (y + needed > pageH - margin) {
+        doc.addPage();
+        // Re-paint background tint on new page
+        doc.setFillColor(tintR, tintG, tintB);
+        doc.rect(0, 0, pageW, pageH, 'F');
+        y = margin;
+      }
+    };
     const projColor = proj.color || '#7c6af7';
     const rgb = hexToRgb(projColor);
     const green = { r: 16, g: 185, b: 129 };
@@ -2432,28 +2683,72 @@ async function exportProjectReport(projId, format) {
       doc.setLineWidth(0.2);
     };
 
-    // Header bar
+    // ── Page background tint (subtle project-color wash) ─────────────────────
+    doc.setFillColor(rgb.r, rgb.g, rgb.b, 0.06); // very faint tint
+    // jsPDF doesn't support alpha natively, so blend manually toward white
+    const tintR = Math.round(rgb.r * 0.06 + 255 * 0.94);
+    const tintG = Math.round(rgb.g * 0.06 + 255 * 0.94);
+    const tintB = Math.round(rgb.b * 0.06 + 255 * 0.94);
+    doc.setFillColor(tintR, tintG, tintB);
+    doc.rect(0, 0, pageW, pageH, 'F');
+
+    // ── Title strip (full project color) ─────────────────────────────────────
+    const titleStripH = 28;
     doc.setFillColor(rgb.r, rgb.g, rgb.b);
-    doc.rect(0, 0, pageW, 28, 'F');
+    doc.rect(0, 0, pageW, titleStripH, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(17); doc.setFont('helvetica', 'bold');
     doc.text(proj.name, margin, 14);
     doc.setFontSize(8); doc.setFont('helvetica', 'normal');
     doc.text('Project Report', margin, 22);
     doc.text(new Date().toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }), pageW - margin, 22, { align: 'right' });
-    y = 36;
 
-    // Description
+    // ── Description strip (darkened band — 40% darker than project color) ────
+    const descMaxW = pageW - margin * 2;
+    let descLines = [];
     if (proj.desc) {
-      doc.setTextColor(100, 100, 100); doc.setFontSize(9); doc.setFont('helvetica', 'italic');
-      doc.text(proj.desc, margin, y); y += 9;
+      doc.setFontSize(8.5); doc.setFont('helvetica', 'italic');
+      descLines = doc.splitTextToSize(proj.desc, descMaxW);
+    }
+    const descLineH = 5;
+    const descPadV = proj.desc ? 8 + descLines.length * descLineH : 0;
+
+    if (proj.desc) {
+      // Darken the project color by blending toward black (40%)
+      const dR = Math.round(rgb.r * 0.60);
+      const dG = Math.round(rgb.g * 0.60);
+      const dB = Math.round(rgb.b * 0.60);
+      doc.setFillColor(dR, dG, dB);
+      doc.rect(0, titleStripH, pageW, descPadV, 'F');
+
+      // Thin separator line between title and description band
+      doc.setDrawColor(255, 255, 255, 0.2);
+      doc.setLineWidth(0.3);
+      doc.line(0, titleStripH, pageW, titleStripH);
+      doc.setLineWidth(0.2);
+
+      // Description text — soft white
+      doc.setTextColor(230, 230, 255);
+      doc.setFontSize(8.5); doc.setFont('helvetica', 'italic');
+      descLines.forEach((line, i) => {
+        doc.text(line, margin, titleStripH + 6 + i * descLineH);
+      });
     }
 
-    // Summary box
+    y = titleStripH + descPadV + 8;
+
+    // ── Summary box ───────────────────────────────────────────────────────────
     const totalTasks = plannerState.plannerTasks.filter(t => versions.some(v => v.id === t.versionId)).length;
     const doneTasks = plannerState.plannerTasks.filter(t => versions.some(v => v.id === t.versionId) && t.done).length;
     const allProjDone = totalTasks > 0 && doneTasks === totalTasks;
-    doc.setFillColor(...(allProjDone ? [220, 248, 236] : [240, 240, 255]));
+    if (allProjDone) {
+      doc.setFillColor(220, 248, 236);
+    } else {
+      const sbR = Math.round(rgb.r * 0.12 + 255 * 0.88);
+      const sbG = Math.round(rgb.g * 0.12 + 255 * 0.88);
+      const sbB = Math.round(rgb.b * 0.12 + 255 * 0.88);
+      doc.setFillColor(sbR, sbG, sbB);
+    }
     doc.roundedRect(margin, y, pageW - margin * 2, 8, 2, 2, 'F');
     doc.setFontSize(8.5); doc.setFont('helvetica', 'bold');
     doc.setTextColor(...(allProjDone ? [green.r, green.g, green.b] : [60, 60, 60]));
@@ -2491,7 +2786,7 @@ async function exportProjectReport(projId, format) {
 
       // Draw checkmark before FINISHED
       if (allDone) {
-        drawCheck(rightX - rightLabelW - 4, y + 6.2, { r: 255, g: 255, b: 255 });
+        drawCheck(rightX - rightLabelW - 3, y + 3.9, { r: 255, g: 255, b: 255 });
       }
       doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
       doc.text(rightLabel, rightX, y + 5, { align: 'right' });
@@ -2513,7 +2808,14 @@ async function exportProjectReport(projId, format) {
           checkPage(rowH + 2);
           // Alternating row bg
           if (i % 2 === 0) {
-            doc.setFillColor(...(allDone ? [238, 251, 245] : [248, 248, 255]));
+            if (allDone) {
+              doc.setFillColor(238, 251, 245);
+            } else {
+              const rowR = Math.round(rgb.r * 0.05 + 255 * 0.95);
+              const rowG = Math.round(rgb.g * 0.05 + 255 * 0.95);
+              const rowB = Math.round(rgb.b * 0.05 + 255 * 0.95);
+              doc.setFillColor(rowR, rowG, rowB);
+            }
             doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
           }
           // Checkbox — 3.5x3.5, vertically centered in rowH
