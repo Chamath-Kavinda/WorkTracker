@@ -603,8 +603,14 @@ function startTask(taskId) {
   state.activeTaskId = taskId;
   state.activeSessionStart = Date.now();
 
-  // Update task status
   const task = state.tasks.find(t => t.id === taskId);
+  const existingMs = getTaskTotalMs(taskId) - (Date.now() - state.activeSessionStart);
+  if (api.setActiveTimer) api.setActiveTimer({
+    taskName: task?.name,
+    startedAt: state.activeSessionStart - existingMs  // offset back by prior sessions
+  });
+
+  // Update task status
   if (task) task.status = 'running';
 
   saveData();
@@ -656,6 +662,8 @@ function stopCurrentSession(markCompleted) {
 
   state.activeTaskId = null;
   state.activeSessionStart = null;
+
+  if (api.setActiveTimer) api.setActiveTimer({ taskName: null, startedAt: null });
 
   clearInterval(state.timerInterval);
   state.timerInterval = null;
@@ -1736,11 +1744,11 @@ function renderReportSummaryView(dates, labelFn, grandTotalLabel) {
           <div class="summary-period-bar" style="width:${pct}%"></div>
         </div>
         ${v.totalMs > 0
-          ? `<div class="summary-period-dur">${formatDurationShort(v.totalMs)}</div>
+        ? `<div class="summary-period-dur">${formatDurationShort(v.totalMs)}</div>
              <div class="summary-period-tasks">${v.taskCount} task${v.taskCount !== 1 ? 's' : ''}</div>`
-          : `<div class="summary-period-dur" style="color:#ffffff20">—</div>
+        : `<div class="summary-period-dur" style="color:#ffffff20">—</div>
              <div class="summary-period-tasks summary-period-empty">no work</div>`
-        }
+      }
       </div>`;
   }).join('');
 
@@ -1757,8 +1765,8 @@ function renderReportSummaryView(dates, labelFn, grandTotalLabel) {
         </tr></thead>
         <tbody>
           ${taskSummary.map(t => {
-            const pct = grandTotal > 0 ? ((t.totalMs / grandTotal) * 100).toFixed(1) : '0.0';
-            return `<tr>
+      const pct = grandTotal > 0 ? ((t.totalMs / grandTotal) * 100).toFixed(1) : '0.0';
+      return `<tr>
               <td><strong>${t.name}</strong></td>
               <td style="color:var(--text-secondary)">${t.daysWorked}</td>
               <td style="color:var(--text-secondary)">${t.sessionCount}</td>
@@ -1772,7 +1780,7 @@ function renderReportSummaryView(dates, labelFn, grandTotalLabel) {
                 </div>
               </td>
             </tr>`;
-          }).join('')}
+    }).join('')}
         </tbody>
       </table>`;
 
@@ -1892,11 +1900,11 @@ function generateReportText(date) {
 function generateReportTextWeekly() {
   const dates = getWeekDates(reportWeekOffset);
   const weekStart = new Date(dates[0] + 'T00:00:00');
-  const weekEnd   = new Date(dates[6] + 'T00:00:00');
-  const fmtOpts   = { month: 'short', day: 'numeric' };
+  const weekEnd = new Date(dates[6] + 'T00:00:00');
+  const fmtOpts = { month: 'short', day: 'numeric' };
   const rangeLabel = `${weekStart.toLocaleDateString([], fmtOpts)} – ${weekEnd.toLocaleDateString([], { ...fmtOpts, year: 'numeric' })}`;
 
-  const dayMap     = aggregateDates(dates);
+  const dayMap = aggregateDates(dates);
   const taskSummary = aggregateTasksAcrossDates(dates);
   const grandTotal = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
   const workedDays = Object.values(dayMap).filter(v => v.totalMs > 0).length;
@@ -1946,10 +1954,10 @@ function generateReportTextMonthly() {
   const ref = new Date(dates[0] + 'T00:00:00');
   const monthName = ref.toLocaleDateString([], { month: 'long', year: 'numeric' });
 
-  const dayMap      = aggregateDates(dates);
+  const dayMap = aggregateDates(dates);
   const taskSummary = aggregateTasksAcrossDates(dates);
-  const grandTotal  = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
-  const workedDays  = Object.values(dayMap).filter(v => v.totalMs > 0).length;
+  const grandTotal = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
+  const workedDays = Object.values(dayMap).filter(v => v.totalMs > 0).length;
   const totalSessions = Object.values(dayMap).reduce((a, v) => a + v.sessionCount, 0);
 
   let text = `WorkTracker Monthly Report\n`;
@@ -2208,11 +2216,11 @@ function _pdfFooter(doc) {
 
 // ── Daily export ──────────────────────────────────────────────────────────────
 async function _exportReportDaily(format) {
-  const date    = document.getElementById('report-date').value;
+  const date = document.getElementById('report-date').value;
   const dateStr = date || todayStr();
 
   if (format === 'txt') {
-    const content  = generateReportText(dateStr);
+    const content = generateReportText(dateStr);
     const filepath = await api.exportReport({ content, filename: `worktracker-daily-${dateStr}.txt`, folder: 'Reports' });
     showNotif(`Report saved: ${filepath}`, 'success');
     return;
@@ -2220,9 +2228,9 @@ async function _exportReportDaily(format) {
 
   // PDF — original design (Image 1 style)
   const { jsPDF } = window.jspdf;
-  const doc    = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pageW  = doc.internal.pageSize.getWidth();
-  const pageH  = doc.internal.pageSize.getHeight();
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
   const margin = 20;
   let y = margin;
 
@@ -2256,7 +2264,7 @@ async function _exportReportDaily(format) {
 
   // ── Build task data
   const sessions = state.sessions.filter(s => s.date === d);
-  const taskMap  = {};
+  const taskMap = {};
   sessions.forEach(s => {
     if (!taskMap[s.taskId]) taskMap[s.taskId] = { name: s.taskName, sessions: [], totalMs: 0 };
     taskMap[s.taskId].sessions.push(s);
@@ -2282,10 +2290,10 @@ async function _exportReportDaily(format) {
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   const cols = [margin + 3, 90, 120, 148, 172];
-  doc.text('TASK',     cols[0], y + 5.5);
+  doc.text('TASK', cols[0], y + 5.5);
   doc.text('SESSIONS', cols[1], y + 5.5);
-  doc.text('START',    cols[2], y + 5.5);
-  doc.text('END',      cols[3], y + 5.5);
+  doc.text('START', cols[2], y + 5.5);
+  doc.text('END', cols[3], y + 5.5);
   doc.text('DURATION', cols[4], y + 5.5);
   y += 8;
 
@@ -2298,7 +2306,7 @@ async function _exportReportDaily(format) {
       doc.rect(margin, y, pageW - margin * 2, 9, 'F');
     }
     const first = data.sessions[0];
-    const last  = data.sessions[data.sessions.length - 1];
+    const last = data.sessions[data.sessions.length - 1];
     doc.setTextColor(30, 30, 30);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
@@ -2343,15 +2351,15 @@ async function _exportReportDaily(format) {
 
 // ── Weekly export ─────────────────────────────────────────────────────────────
 async function _exportReportWeekly(format) {
-  const dates      = getWeekDates(reportWeekOffset);
-  const weekStart  = new Date(dates[0] + 'T00:00:00');
-  const weekEnd    = new Date(dates[6] + 'T00:00:00');
-  const fmtOpts    = { month: 'short', day: 'numeric' };
+  const dates = getWeekDates(reportWeekOffset);
+  const weekStart = new Date(dates[0] + 'T00:00:00');
+  const weekEnd = new Date(dates[6] + 'T00:00:00');
+  const fmtOpts = { month: 'short', day: 'numeric' };
   const rangeLabel = `${weekStart.toLocaleDateString([], fmtOpts)}–${weekEnd.toLocaleDateString([], { ...fmtOpts, year: 'numeric' })}`;
-  const fileSlug   = `${dates[0]}_${dates[6]}`;
+  const fileSlug = `${dates[0]}_${dates[6]}`;
 
   if (format === 'txt') {
-    const content  = generateReportTextWeekly();
+    const content = generateReportTextWeekly();
     const filepath = await api.exportReport({ content, filename: `worktracker-weekly-${fileSlug}.txt`, folder: 'Reports' });
     showNotif(`Report saved: ${filepath}`, 'success');
     return;
@@ -2359,9 +2367,9 @@ async function _exportReportWeekly(format) {
 
   // PDF
   const { jsPDF } = window.jspdf;
-  const doc    = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pageW  = doc.internal.pageSize.getWidth();
-  const pageH  = doc.internal.pageSize.getHeight();
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
   const margin = 20;
   let y = margin;
 
@@ -2378,12 +2386,12 @@ async function _exportReportWeekly(format) {
   doc.text(`Generated: ${new Date().toLocaleString()}`, margin, y);
   y += 10;
 
-  const dayMap      = aggregateDates(dates);
+  const dayMap = aggregateDates(dates);
   const taskSummary = aggregateTasksAcrossDates(dates);
-  const grandTotal  = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
-  const workedDays  = Object.values(dayMap).filter(v => v.totalMs > 0).length;
-  const totalSess   = Object.values(dayMap).reduce((a, v) => a + v.sessionCount, 0);
-  const dailyAvg    = workedDays > 0 ? Math.round(grandTotal / workedDays) : 0;
+  const grandTotal = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
+  const workedDays = Object.values(dayMap).filter(v => v.totalMs > 0).length;
+  const totalSess = Object.values(dayMap).reduce((a, v) => a + v.sessionCount, 0);
+  const dailyAvg = workedDays > 0 ? Math.round(grandTotal / workedDays) : 0;
 
   y = _pdfSummaryBox(doc, y,
     `Total: ${formatDurationShort(grandTotal)}`,
@@ -2393,14 +2401,14 @@ async function _exportReportWeekly(format) {
   // ── Day-by-day bar chart ───────────────────────────────────────────────────
   y = _pdfSectionTitle(doc, y, 'DAY-BY-DAY BREAKDOWN');
   const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const maxMs    = Math.max(...Object.values(dayMap).map(v => v.totalMs), 1);
-  const barMaxW  = pageW - margin * 2 - 50;
+  const maxMs = Math.max(...Object.values(dayMap).map(v => v.totalMs), 1);
+  const barMaxW = pageW - margin * 2 - 50;
 
   dates.forEach((d, i) => {
     checkPage(10);
-    const v     = dayMap[d];
+    const v = dayMap[d];
     const label = `${dayNames[i]}  ${new Date(d + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
-    const barW  = v.totalMs > 0 ? Math.max((v.totalMs / maxMs) * barMaxW, 3) : 0;
+    const barW = v.totalMs > 0 ? Math.max((v.totalMs / maxMs) * barMaxW, 3) : 0;
 
     // Label — plain style for all days, no today highlight
     doc.setTextColor(60, 60, 60);
@@ -2434,7 +2442,7 @@ async function _exportReportWeekly(format) {
   const taskDateRows = [];
   dates.forEach(d => {
     const daySessions = state.sessions.filter(s => s.date === d);
-    const taskMapDay  = {};
+    const taskMapDay = {};
     daySessions.forEach(s => {
       if (!taskMapDay[s.taskId]) taskMapDay[s.taskId] = { name: s.taskName, totalMs: 0 };
       taskMapDay[s.taskId].totalMs += s.duration;
@@ -2462,8 +2470,8 @@ async function _exportReportWeekly(format) {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     const tcols = [margin + 3, 120, 165];
-    doc.text('TASK',     tcols[0], y + 5.5);
-    doc.text('DATE',     tcols[1], y + 5.5);
+    doc.text('TASK', tcols[0], y + 5.5);
+    doc.text('DATE', tcols[1], y + 5.5);
     doc.text('DURATION', tcols[2], y + 5.5);
     y += 8;
 
@@ -2489,20 +2497,20 @@ async function _exportReportWeekly(format) {
   }
 
   _pdfFooter(doc);
-  const base64   = btoa(String.fromCharCode(...new Uint8Array(doc.output('arraybuffer'))));
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(doc.output('arraybuffer'))));
   const filepath = await api.exportReport({ content: base64, filename: `worktracker-weekly-${fileSlug}.pdf`, isPdf: true, folder: 'Reports' });
   showNotif(`PDF saved: ${filepath}`, 'success');
 }
 
 // ── Monthly export ────────────────────────────────────────────────────────────
 async function _exportReportMonthly(format) {
-  const dates     = getMonthDates(reportMonthOffset);
-  const ref       = new Date(dates[0] + 'T00:00:00');
+  const dates = getMonthDates(reportMonthOffset);
+  const ref = new Date(dates[0] + 'T00:00:00');
   const monthName = ref.toLocaleDateString([], { month: 'long', year: 'numeric' });
-  const fileSlug  = `${ref.getFullYear()}-${String(ref.getMonth() + 1).padStart(2, '0')}`;
+  const fileSlug = `${ref.getFullYear()}-${String(ref.getMonth() + 1).padStart(2, '0')}`;
 
   if (format === 'txt') {
-    const content  = generateReportTextMonthly();
+    const content = generateReportTextMonthly();
     const filepath = await api.exportReport({ content, filename: `worktracker-monthly-${fileSlug}.txt`, folder: 'Reports' });
     showNotif(`Report saved: ${filepath}`, 'success');
     return;
@@ -2510,9 +2518,9 @@ async function _exportReportMonthly(format) {
 
   // PDF
   const { jsPDF } = window.jspdf;
-  const doc    = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pageW  = doc.internal.pageSize.getWidth();
-  const pageH  = doc.internal.pageSize.getHeight();
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
   const margin = 20;
   let y = margin;
 
@@ -2529,12 +2537,12 @@ async function _exportReportMonthly(format) {
   doc.text(`Generated: ${new Date().toLocaleString()}`, margin, y);
   y += 10;
 
-  const dayMap      = aggregateDates(dates);
+  const dayMap = aggregateDates(dates);
   const taskSummary = aggregateTasksAcrossDates(dates);
-  const grandTotal  = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
-  const workedDays  = Object.values(dayMap).filter(v => v.totalMs > 0).length;
-  const totalSess   = Object.values(dayMap).reduce((a, v) => a + v.sessionCount, 0);
-  const dailyAvg    = workedDays > 0 ? Math.round(grandTotal / workedDays) : 0;
+  const grandTotal = Object.values(dayMap).reduce((a, v) => a + v.totalMs, 0);
+  const workedDays = Object.values(dayMap).filter(v => v.totalMs > 0).length;
+  const totalSess = Object.values(dayMap).reduce((a, v) => a + v.sessionCount, 0);
+  const dailyAvg = workedDays > 0 ? Math.round(grandTotal / workedDays) : 0;
 
   y = _pdfSummaryBox(doc, y,
     `Total: ${formatDurationShort(grandTotal)}`,
@@ -2544,7 +2552,7 @@ async function _exportReportMonthly(format) {
   // ── Day-by-day bar chart (worked days only) ────────────────────────────────
   y = _pdfSectionTitle(doc, y, 'DAY-BY-DAY BREAKDOWN (worked days only)');
 
-  const maxMs   = Math.max(...Object.values(dayMap).map(v => v.totalMs), 1);
+  const maxMs = Math.max(...Object.values(dayMap).map(v => v.totalMs), 1);
   const barMaxW = pageW - margin * 2 - 55;
 
   const workedEntries = dates.filter(d => dayMap[d].totalMs > 0);
@@ -2557,9 +2565,9 @@ async function _exportReportMonthly(format) {
   } else {
     workedEntries.forEach(d => {
       checkPage(10);
-      const v     = dayMap[d];
+      const v = dayMap[d];
       const label = new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-      const barW  = Math.max((v.totalMs / maxMs) * barMaxW, 3);
+      const barW = Math.max((v.totalMs / maxMs) * barMaxW, 3);
 
       // Plain style — no today highlight
       doc.setTextColor(60, 60, 60);
@@ -2588,7 +2596,7 @@ async function _exportReportMonthly(format) {
   const taskDateRows = [];
   dates.forEach(d => {
     const daySessions = state.sessions.filter(s => s.date === d);
-    const taskMapDay  = {};
+    const taskMapDay = {};
     daySessions.forEach(s => {
       if (!taskMapDay[s.taskId]) taskMapDay[s.taskId] = { name: s.taskName, totalMs: 0 };
       taskMapDay[s.taskId].totalMs += s.duration;
@@ -2616,8 +2624,8 @@ async function _exportReportMonthly(format) {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     const tcols = [margin + 3, 120, 165];
-    doc.text('TASK',     tcols[0], y + 5.5);
-    doc.text('DATE',     tcols[1], y + 5.5);
+    doc.text('TASK', tcols[0], y + 5.5);
+    doc.text('DATE', tcols[1], y + 5.5);
     doc.text('DURATION', tcols[2], y + 5.5);
     y += 8;
 
@@ -2643,7 +2651,7 @@ async function _exportReportMonthly(format) {
   }
 
   _pdfFooter(doc);
-  const base64   = btoa(String.fromCharCode(...new Uint8Array(doc.output('arraybuffer'))));
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(doc.output('arraybuffer'))));
   const filepath = await api.exportReport({ content: base64, filename: `worktracker-monthly-${fileSlug}.pdf`, isPdf: true, folder: 'Reports' });
   showNotif(`PDF saved: ${filepath}`, 'success');
 }
@@ -2980,7 +2988,7 @@ document.addEventListener('DOMContentLoaded', init);
 const PLANNER_COLORS = [
   '#7c6af7', '#22d3ee', '#f59e0b', '#ef4444',
   '#ec4899', '#f97316', '#06b6d4', '#0ea5e9',
-  '#e11d48', '#d946ef', 
+  '#e11d48', '#d946ef',
 ];
 
 let plannerState = {

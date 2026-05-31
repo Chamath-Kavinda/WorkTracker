@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportReport: (data) => ipcRenderer.invoke('export-report', data),
   openExportsFolder: (folder) => ipcRenderer.invoke('open-exports-folder', folder),
   getAppStartTime: () => ipcRenderer.invoke('get-app-start-time'),
+  setActiveTimer: (data) => ipcRenderer.invoke('set-active-timer', data),
 
   // Google OAuth via main-process BrowserWindow
   googleSignIn: () => ipcRenderer.invoke('google-sign-in'),

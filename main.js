@@ -44,6 +44,7 @@ function saveSettings(settings) {
 
 let mainWindow;
 let tray;
+let _trayTickInterval = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -121,7 +122,7 @@ ipcMain.handle('export-report', (_, { content, filename, isPdf, folder }) => {
   if (!fs.existsSync(docsPath)) fs.mkdirSync(docsPath, { recursive: true });
   const filepath = path.join(docsPath, filename);
   if (isPdf) fs.writeFileSync(filepath, Buffer.from(content, 'base64'));
-  else       fs.writeFileSync(filepath, content, 'utf8');
+  else fs.writeFileSync(filepath, content, 'utf8');
   return filepath;
 });
 ipcMain.handle('open-exports-folder', (_, folder) => {
@@ -147,17 +148,17 @@ let _authServer = null; // keep reference so we can close stale servers
 ipcMain.handle('google-sign-in', async () => {
   // Kill any leftover server from a previous failed attempt
   if (_authServer) {
-    try { _authServer.close(); } catch (_) {}
+    try { _authServer.close(); } catch (_) { }
     _authServer = null;
   }
 
   return new Promise((resolve, reject) => {
     const CLIENT_ID = '482821840009-bvqa4etj6v06rn9fjr6bvgrdt5oil8u6.apps.googleusercontent.com';
-    const REDIRECT  = `http://localhost:${AUTH_PORT}/auth`;
+    const REDIRECT = `http://localhost:${AUTH_PORT}/auth`;
 
     // Start a one-shot local server on the fixed port
     const server = http.createServer();
-    _authServer  = server;
+    _authServer = server;
     server.listen(AUTH_PORT, '127.0.0.1', () => {
       const port = AUTH_PORT;
 
@@ -186,116 +187,116 @@ ipcMain.handle('google-sign-in', async () => {
         if (reqUrl.pathname === '/auth' && req.method === 'GET') {
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
           res.end(`<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Signing in to WorkTracker...</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #0f0f13;
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100vh;
-    flex-direction: column;
-    gap: 20px;
-  }
+          <html>
+          <head>
+          <meta charset="utf-8">
+          <title>Signing in to WorkTracker...</title>
+          <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+              background: #0f0f13;
+              color: #fff;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              height: 100vh;
+              flex-direction: column;
+              gap: 20px;
+            }
 
-  /* ── Spinner (shown while loading) ── */
-  .spinner {
-    width: 64px; height: 64px;
-    border: 4px solid #2a2a35;
-    border-top-color: #7c6af7;
-    border-radius: 50%;
-    animation: spin .8s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
+            /* ── Spinner (shown while loading) ── */
+            .spinner {
+              width: 64px; height: 64px;
+              border: 4px solid #2a2a35;
+              border-top-color: #7c6af7;
+              border-radius: 50%;
+              animation: spin .8s linear infinite;
+            }
+            @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* ── Animated tick circle (shown on success) ── */
-  .tick-wrap {
-    display: none;
-    width: 80px; height: 80px;
-  }
-  .tick-wrap svg { width: 80px; height: 80px; }
+            /* ── Animated tick circle (shown on success) ── */
+            .tick-wrap {
+              display: none;
+              width: 80px; height: 80px;
+            }
+            .tick-wrap svg { width: 80px; height: 80px; }
 
-  .circle {
-    fill: none;
-    stroke: #7c6af7;
-    stroke-width: 4;
-    stroke-dasharray: 226;
-    stroke-dashoffset: 226;
-    stroke-linecap: round;
-    animation: drawCircle .55s ease forwards;
-  }
-  @keyframes drawCircle {
-    to { stroke-dashoffset: 0; }
-  }
+            .circle {
+              fill: none;
+              stroke: #7c6af7;
+              stroke-width: 4;
+              stroke-dasharray: 226;
+              stroke-dashoffset: 226;
+              stroke-linecap: round;
+              animation: drawCircle .55s ease forwards;
+            }
+            @keyframes drawCircle {
+              to { stroke-dashoffset: 0; }
+            }
 
-  .check {
-    fill: none;
-    stroke: #a78bfa;
-    stroke-width: 4.5;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-dasharray: 60;
-    stroke-dashoffset: 60;
-    animation: drawCheck .35s ease .5s forwards;
-  }
-  @keyframes drawCheck {
-    to { stroke-dashoffset: 0; }
-  }
+            .check {
+              fill: none;
+              stroke: #a78bfa;
+              stroke-width: 4.5;
+              stroke-linecap: round;
+              stroke-linejoin: round;
+              stroke-dasharray: 60;
+              stroke-dashoffset: 60;
+              animation: drawCheck .35s ease .5s forwards;
+            }
+            @keyframes drawCheck {
+              to { stroke-dashoffset: 0; }
+            }
 
-  h2 { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
-  p  { color: #888; font-size: 14px; }
+            h2 { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
+            p  { color: #888; font-size: 14px; }
 
-  .error-icon { font-size: 56px; display: none; }
-</style>
-</head>
-<body>
-  <div class="spinner"  id="spinner"></div>
-  <div class="tick-wrap" id="tick">
-    <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
-      <circle class="circle" cx="40" cy="40" r="36"
-              transform="rotate(-90 40 40)"/>
-      <polyline class="check" points="24,41 35,52 56,30"/>
-    </svg>
-  </div>
-  <div class="error-icon" id="errIcon">&#9888;</div>
-  <h2 id="title">Signing you in...</h2>
-  <p  id="msg">Please wait a moment</p>
+            .error-icon { font-size: 56px; display: none; }
+          </style>
+          </head>
+          <body>
+            <div class="spinner"  id="spinner"></div>
+            <div class="tick-wrap" id="tick">
+              <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+                <circle class="circle" cx="40" cy="40" r="36"
+                        transform="rotate(-90 40 40)"/>
+                <polyline class="check" points="24,41 35,52 56,30"/>
+              </svg>
+            </div>
+            <div class="error-icon" id="errIcon">&#9888;</div>
+            <h2 id="title">Signing you in...</h2>
+            <p  id="msg">Please wait a moment</p>
 
-  <script>
-    const TOKEN_URL = 'http://localhost:${port}/token';
-    const params = new URLSearchParams(
-      location.hash.replace('#', '') || location.search.replace('?', '')
-    );
-    const access_token = params.get('access_token');
-    const id_token     = params.get('id_token');
-    const error        = params.get('error');
+            <script>
+              const TOKEN_URL = 'http://localhost:${port}/token';
+              const params = new URLSearchParams(
+                location.hash.replace('#', '') || location.search.replace('?', '')
+              );
+              const access_token = params.get('access_token');
+              const id_token     = params.get('id_token');
+              const error        = params.get('error');
 
-    fetch(TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ access_token, id_token, error })
-    }).then(r => {
-      if (r.ok) {
-        document.getElementById('spinner').style.display = 'none';
-        document.getElementById('tick').style.display    = 'block';
-        document.getElementById('title').textContent     = 'Signed in successfully!';
-        document.getElementById('msg').textContent       = 'You can close this tab and return to WorkTracker.';
-      }
-    }).catch(() => {
-      document.getElementById('spinner').style.display  = 'none';
-      document.getElementById('errIcon').style.display  = 'block';
-      document.getElementById('title').textContent      = 'Something went wrong';
-      document.getElementById('msg').textContent        = 'Please return to WorkTracker and try again.';
-    });
-  </script>
-</body>
-</html>`);
+              fetch(TOKEN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ access_token, id_token, error })
+              }).then(r => {
+                if (r.ok) {
+                  document.getElementById('spinner').style.display = 'none';
+                  document.getElementById('tick').style.display    = 'block';
+                  document.getElementById('title').textContent     = 'Signed in successfully!';
+                  document.getElementById('msg').textContent       = 'You can close this tab and return to WorkTracker.';
+                }
+              }).catch(() => {
+                document.getElementById('spinner').style.display  = 'none';
+                document.getElementById('errIcon').style.display  = 'block';
+                document.getElementById('title').textContent      = 'Something went wrong';
+                document.getElementById('msg').textContent        = 'Please return to WorkTracker and try again.';
+              });
+            </script>
+          </body>
+          </html>`);
           return;
         }
 
@@ -344,4 +345,38 @@ ipcMain.handle('google-sign-in', async () => {
       }
     });
   });
+});
+
+ipcMain.handle('set-active-timer', (_, { taskName, startedAt }) => {
+  if (_trayTickInterval) { clearInterval(_trayTickInterval); _trayTickInterval = null; }
+
+  if (!taskName) {
+    tray.setToolTip('WorkTracker');
+    return true;
+  }
+
+  let toggle = false;
+
+  const tick = () => {
+    const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+    const h = Math.floor(elapsed / 3600);
+    const m = Math.floor((elapsed % 3600) / 60);
+    const s = elapsed % 60;
+    const hms = h > 0
+      ? `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`
+      : `${m}m ${String(s).padStart(2, '0')}s`;
+
+    const label = taskName.length > 28 ? taskName.slice(0, 25) + '…' : taskName;
+
+    // Alternate between a regular space and non-breaking space to trick Windows
+    // into seeing a "new" string every tick without any visual difference
+    const pad = toggle ? ' ' : '\u00A0';
+    toggle = !toggle;
+
+    tray.setToolTip(`▶ ${label} — ${hms}${pad}`);
+  };
+
+  tick();
+  _trayTickInterval = setInterval(tick, 1000);
+  return true;
 });
