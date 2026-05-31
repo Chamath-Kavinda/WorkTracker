@@ -13,7 +13,7 @@
    npm install
    npm run build
    ```
-3. Find your installer at: `dist/WorkTracker Setup 5.5.3.exe`
+3. Find your installer at: `dist/WorkTracker Setup 6.1.0.exe`
 
 ## What you get
 - `.exe` NSIS installer for Windows 10/11
@@ -36,6 +36,14 @@
 - ✅ Tasks left running overnight are auto-completed at midnight with accurate session time
 - ✅ Delete tasks with confirmation popup (today's tasks only)
 - ✅ Edit task name, category, and notes inline
+
+### Idle Detection
+- ✅ Configurable idle threshold — auto-pauses the active timer after inactivity
+- ✅ Warning countdown shown 60 seconds before the threshold is reached
+- ✅ When idle triggers: timer is paused and the active task card turns orange — it does **not** disappear
+- ✅ Idle card displays "You are in idle mode — move your mouse or press any key to resume"
+- ✅ Moving the mouse or pressing a key automatically resumes the timer
+- ✅ Idle detection only activates when a timer is actively running
 
 ### Planner
 - ✅ Project board with Kanban-style version columns

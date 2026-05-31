@@ -1,6 +1,6 @@
 {
   "name": "worktracker",
-  "version": "5.5.4",
+  "version": "6.1.0",
   "description": "Work Time Tracker - Track your tasks with precision",
   "author": "Chama Bro",
   "main": "main.js",
