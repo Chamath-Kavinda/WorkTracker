@@ -1,0 +1,113 @@
+rules_version = '2';
+// WorkTracker — Firestore Security Rules
+//
+// NOT auto-deployed: this repo has no Firebase CLI / functions setup, so
+// deploy this manually (Firebase Console → Firestore → Rules, or
+// `firebase deploy --only firestore:rules` once `firebase login` /
+// `firebase use worktracker-29228` has been run once).
+//
+// Phase 1 (Organizations foundation) only. Future phases add rules for
+// `plans/*` (Phase 2), `changeRequests`/`requestCounters` (Phase 3),
+// `presence` (Phase 5), and the `status`/soft-delete fields (Phase 6).
+//
+// NOTE on the org-bootstrap rule below: it relies on writes within a single
+// Firestore batch being evaluated against the database state as it stands
+// after earlier writes in that same batch have applied (org doc created,
+// then its founding-admin member doc created). This is the standard pattern
+// for "create a resource + its owner sub-doc" in one commit, but test it
+// against the Firebase emulator before relying on it in production — batch
+// rule-evaluation ordering has had subtle edge cases across SDK versions.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Legacy per-user app data (existing, untouched) ────────────────────
+    // This already holds each person's ENTIRE private data (tasks, sessions,
+    // projects, versions, plannerTasks) — kept exactly as the app has always
+    // used it: only the owner may read/write their own single document.
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // ── Public profile lookup (NEW — Phase 1) ──────────────────────────────
+    // Deliberately separate from `users/{uid}` above. Holds only
+    // email/displayName/photoURL — minimal, non-sensitive fields so any
+    // signed-in user can look someone up by Gmail to add them to an
+    // Organization (the "GitHub collaborator" add flow).
+    match /userProfiles/{uid} {
+      allow get, list: if request.auth != null;
+      allow create, update: if request.auth != null && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    // ── Organizations (NEW — Phase 1) ───────────────────────────────────────
+    function isOrgMember(orgId) {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
+    }
+    function orgRole(orgId) {
+      return get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role;
+    }
+    function isOrgAdmin(orgId) {
+      return isOrgMember(orgId) && orgRole(orgId) == 'admin';
+    }
+
+    match /organizations/{orgId} {
+      allow read: if isOrgMember(orgId);
+
+      // Creating the org itself: must self-attribute as creator, and must
+      // start with exactly one Admin (the founding admin doc is created in
+      // the same batch — see createOrganization() in org.js).
+      allow create: if request.auth != null &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.adminCount == 1;
+
+      // Only an Admin can rename/delete the org or touch adminCount, and
+      // adminCount may never drop below 1 — this is what blocks orphaning
+      // the org (no Admin left to manage it).
+      allow update: if isOrgAdmin(orgId) && request.resource.data.adminCount >= 1;
+      allow delete: if isOrgAdmin(orgId);
+
+      match /members/{memberUid} {
+        allow read: if isOrgMember(orgId);
+
+        allow create: if (
+          // Case A: the founding Admin, created together with the org
+          // itself in the same batch (see comment at top of file).
+          request.resource.data.role == 'admin' &&
+          request.resource.data.uid == request.auth.uid &&
+          get(/databases/$(database)/documents/organizations/$(orgId)).data.createdBy == request.auth.uid
+        ) || (
+          // Case B: an existing Admin adding someone else.
+          isOrgAdmin(orgId)
+        );
+
+        // Only an Admin may edit a membership doc (role changes), and never
+        // their own — self-role-change is blocked entirely; only another
+        // Admin can change it (see changeMemberRole() in org.js, which also
+        // maintains organizations/{orgId}.adminCount transactionally).
+        allow update: if isOrgAdmin(orgId) && request.auth.uid != memberUid;
+
+        // An Admin may remove anyone; anyone may delete (leave) their own
+        // membership doc. The sole-admin-cannot-leave guard is enforced by
+        // the client's transaction (removeOrgMember() in org.js), which
+        // updates adminCount in the same transaction — the `update` rule
+        // above's `adminCount >= 1` check on the org doc is what actually
+        // backstops this if a client ever tried to bypass the app.
+        allow delete: if isOrgAdmin(orgId) || request.auth.uid == memberUid;
+      }
+
+      match /activity/{activityId} {
+        allow read: if isOrgMember(orgId);
+        allow create: if isOrgMember(orgId) &&
+          request.resource.data.actorUid == request.auth.uid;
+        allow update, delete: if false; // append-only log
+      }
+    }
+
+    // Everything else: deny by default.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

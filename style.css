@@ -1431,3 +1431,33 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: 
   transform: scale(1.01);
   transition: transform 0.1s, box-shadow 0.1s;
 }
+
+/* ── Organizations (Phase 1) ── */
+.org-detail-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+}
+
+.org-avatar {
+  border-radius: 50%; object-fit: cover; flex-shrink: 0;
+  border: 1.5px solid #ffffff15;
+}
+.org-avatar-fallback {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-dim); color: var(--accent);
+  font-weight: 700; font-size: 13px;
+}
+
+.org-role-badge {
+  display: inline-block; padding: 3px 10px; border-radius: 20px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.org-role-badge.org-role-admin     { background: #f59e0b20; color: #f59e0b; }
+.org-role-badge.org-role-planner   { background: #22d3ee20; color: #22d3ee; }
+.org-role-badge.org-role-developer { background: #10b98120; color: #10b981; }
+.org-role-badge.org-role-visitor   { background: #ffffff10; color: var(--text-muted); }
+
+.org-role-select {
+  padding: 6px 10px; font-size: 12px; width: 130px;
+}

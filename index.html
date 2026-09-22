@@ -596,6 +596,15 @@
           </svg>
           <span>Planner</span>
         </button>
+        <button class="nav-item" data-page="organizations">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <rect x="2" y="6" width="6" height="10" rx="1" stroke="currentColor" stroke-width="1.4" />
+            <rect x="10" y="2" width="6" height="14" rx="1" stroke="currentColor" stroke-width="1.4" />
+            <path d="M4 9h2M4 12h2M12 5h2M12 8h2M12 11h2" stroke="currentColor" stroke-width="1.2"
+              stroke-linecap="round" />
+          </svg>
+          <span>Organizations</span>
+        </button>
         <button class="nav-item" data-page="settings">
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
             <circle cx="9" cy="9" r="2.5" stroke="currentColor" stroke-width="1.4" />
@@ -1008,6 +1017,69 @@
         </div>
       </div>
 
+      <!-- Organizations Page -->
+      <div class="page" id="page-organizations">
+        <div class="page-header">
+          <div>
+            <h1 id="org-page-title">Organizations</h1>
+            <p class="page-subtitle" id="org-page-subtitle">Create teams and manage shared plans</p>
+          </div>
+          <div class="header-actions" id="org-header-actions">
+            <button class="btn-secondary" id="btn-org-back" style="display:none">
+              <svg width="14" height="14" viewBox="0 0 14 14">
+                <path d="M9 2L4 7l5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                  stroke-linejoin="round" fill="none" />
+              </svg>
+              Back
+            </button>
+            <button class="btn-primary" id="btn-org-new">
+              <svg width="14" height="14" viewBox="0 0 14 14">
+                <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              New Organization
+            </button>
+          </div>
+        </div>
+
+        <!-- Orgs List View -->
+        <div id="org-list-view">
+          <div id="org-list-grid" class="planner-projects-grid"></div>
+        </div>
+
+        <!-- Org Detail View -->
+        <div id="org-detail-view" style="display:none">
+          <div class="org-detail-toolbar">
+            <div class="task-search-wrap" style="margin-left:0">
+              <svg class="task-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.3" />
+                <path d="M9.5 9.5L13 13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+              </svg>
+              <input type="text" id="org-member-search" class="task-search-input" placeholder="Search members…"
+                autocomplete="off" />
+              <button class="task-search-clear" id="org-member-search-clear" title="Clear search" style="display:none">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                  <path d="M1 1l8 8M9 1L1 9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                </svg>
+              </button>
+            </div>
+            <button class="btn-primary" id="btn-org-add-member" style="display:none">
+              <svg width="14" height="14" viewBox="0 0 14 14">
+                <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              Add Member
+            </button>
+          </div>
+
+          <div id="org-member-list" class="task-list full"></div>
+
+          <div class="section-header" style="margin-top: 28px;">
+            <h2>ACTIVITY</h2>
+          </div>
+          <div id="org-activity-list" class="task-list"></div>
+        </div>
+        <div style="height:48px;flex-shrink:0"></div>
+      </div>
+
       <!-- Settings Page -->
       <div class="page" id="page-settings">
         <div class="page-header">
@@ -1366,6 +1438,63 @@
     </div>
   </div>
 
+  <!-- Organization: Create Modal -->
+  <div class="modal-overlay" id="org-create-modal" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>New Organization</h3>
+        <button class="modal-close" id="org-create-close">
+          <svg width="14" height="14" viewBox="0 0 14 14">
+            <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Organization Name</label>
+          <input type="text" id="org-create-name" placeholder="e.g. Acme Inc." />
+        </div>
+        <div class="form-group">
+          <label>Color</label>
+          <div class="planner-color-picker" id="org-create-color-picker"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="org-create-cancel">Cancel</button>
+        <button class="btn-primary" id="org-create-save">Create Organization</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Organization: Add Member Modal -->
+  <div class="modal-overlay" id="org-addmember-modal" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Add Member</h3>
+        <button class="modal-close" id="org-addmember-close">
+          <svg width="14" height="14" viewBox="0 0 14 14">
+            <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Gmail Address</label>
+          <div style="display:flex;gap:8px">
+            <input type="email" id="org-addmember-email" placeholder="name@gmail.com" style="flex:1" autocomplete="off" />
+            <button class="btn-secondary" id="org-addmember-lookup">Find</button>
+          </div>
+        </div>
+        <div id="org-addmember-result" style="display:none"></div>
+        <div id="org-addmember-notfound" class="settings-note" style="display:none;color:var(--danger)"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="org-addmember-cancel">Cancel</button>
+        <button class="btn-primary" id="org-addmember-confirm" style="display:none">Add as Visitor</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Auth Modal -->
   <div id="auth-modal-overlay">
     <div class="auth-card">
@@ -1475,6 +1604,7 @@
   </div>
 
   <script src="app.js"></script>
+  <script src="org.js"></script>
   <script>
     window.electronAPI.getAppInfo().then(info => {
       document.getElementById('platform-name').textContent = info.name;
