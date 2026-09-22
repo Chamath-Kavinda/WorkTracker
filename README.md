@@ -1,4 +1,4 @@
-# WorkTracker — Build Instructions
+# WorkTracker — Build Instructions 
 
 ## Requirements
 - Node.js v18+ (https://nodejs.org)
