@@ -111,42 +111,84 @@ const ORG_ACTIVITY_LABELS = {
   role_changed: a => `changed ${a.targetSummary || "a member's"} role`,
 };
 
+// ── "My orgs" mirror (userOrgMemberships/{uid}/orgs/{orgId}) ───────────────
+// See the NOTE at the top of firestore.rules: a collectionGroup('members')
+// query can never satisfy Firestore's security rules for this app (the
+// roster-view rule needs isOrgMember(orgId), which uses exists(), and ANY
+// get()/exists() anywhere in a rule blanket-denies a collection-group list,
+// no matter how the rest of the rule is written). So instead, every write
+// to organizations/{orgId}/members/{uid} is mirrored here, and
+// startMyOrgsListener() queries this plain (non-group) collection instead.
+function _mirrorOrgMembershipRef(uid, orgId) {
+  return fbDb.collection('userOrgMemberships').doc(uid).collection('orgs').doc(orgId);
+}
+async function _writeOrgMembershipMirror(uid, orgId, orgName, orgColor, role, orgDesc) {
+  await _mirrorOrgMembershipRef(uid, orgId).set({ orgId, orgName, orgColor, orgDesc: orgDesc || '', role }, { merge: true });
+}
+async function _deleteOrgMembershipMirror(uid, orgId) {
+  await _mirrorOrgMembershipRef(uid, orgId).delete();
+}
+
 // ── Create Organization ──────────────────────────────────────────────────────
 
-async function createOrganization(name, color) {
+async function createOrganization(name, color, desc) {
   if (!currentUser) { showNotif('Sign in to create an organization', 'error'); return; }
   const clean = (name || '').trim();
   if (!clean) { showNotif('Enter an organization name', 'error'); return; }
+  const cleanDesc = (desc || '').trim();
   const finalColor = color || ORG_COLORS[0];
+  const orgRef = fbDb.collection('organizations').doc();
   try {
-    const orgRef = fbDb.collection('organizations').doc();
-    const batch = fbDb.batch();
-    batch.set(orgRef, {
+    // Step 1: create the org doc alone. Its create rule only inspects
+    // request.resource.data (createdBy/adminCount), so this always works
+    // in isolation.
+    await orgRef.set({
       name: clean,
+      desc: cleanDesc,
       color: finalColor,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       createdBy: currentUser.uid,
       adminCount: 1,
+      memberCount: 1,
     });
-    batch.set(orgRef.collection('members').doc(currentUser.uid), {
-      role: 'admin',
-      uid: currentUser.uid,
-      email: (currentUser.email || '').trim().toLowerCase(),
-      displayName: currentUser.displayName || currentUser.email || 'You',
-      photoURL: currentUser.photoURL || '',
-      orgId: orgRef.id,
-      orgName: clean,
-      orgColor: finalColor,
-      addedBy: currentUser.uid,
-      addedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    });
-    await batch.commit();
+
+    // Step 2: create the founding-admin membership doc as a SEPARATE,
+    // sequentially-awaited write (never batched with step 1 — see the note
+    // at the top of firestore.rules). By now the org doc is committed, so
+    // the membership doc's create rule can genuinely get() it.
+    try {
+      await orgRef.collection('members').doc(currentUser.uid).set({
+        role: 'admin',
+        uid: currentUser.uid,
+        email: (currentUser.email || '').trim().toLowerCase(),
+        displayName: currentUser.displayName || currentUser.email || 'You',
+        photoURL: currentUser.photoURL || '',
+        orgId: orgRef.id,
+        orgName: clean,
+        orgColor: finalColor,
+        addedBy: currentUser.uid,
+        addedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      // Step 2b: mirror it into userOrgMemberships so startMyOrgsListener()
+      // can find it without a collection-group query (see the mirror
+      // helpers above and the note at the top of firestore.rules).
+      await _writeOrgMembershipMirror(currentUser.uid, orgRef.id, clean, finalColor, 'admin', cleanDesc);
+    } catch (memberErr) {
+      // Step 2 or 2b failed after step 1 succeeded — roll back the
+      // now-orphaned org doc (and any mirror that did get written) rather
+      // than leaving a member-less or invisible org behind. Allowed by the
+      // narrow bootstrap clause on organizations/{orgId}'s delete rule.
+      await _deleteOrgMembershipMirror(currentUser.uid, orgRef.id).catch(() => {});
+      await orgRef.delete().catch(() => {});
+      throw memberErr;
+    }
+
     await _logOrgActivity(orgRef.id, 'org_created', clean);
     showNotif(`Organization "${clean}" created 🎉`, 'success');
     closeOrgCreateModal();
   } catch (e) {
-    console.warn(e);
-    showNotif('Could not create organization', 'error');
+    console.error('createOrganization failed:', e.code, e.message, e);
+    showNotif(`Could not create organization: ${e.code || e.message || 'unknown error'}`, 'error');
   }
 }
 
@@ -155,6 +197,9 @@ async function createOrganization(name, color) {
 async function addOrgMember(orgId, profile, role) {
   role = role || 'visitor';
   const org = orgState.myOrgs.find(o => o.orgId === orgId) || {};
+  const orgName = org.orgName || '';
+  const orgColor = org.orgColor || ORG_COLORS[0];
+  const orgDesc = org.orgDesc || '';
   try {
     await fbDb.collection('organizations').doc(orgId).collection('members').doc(profile.uid).set({
       role,
@@ -163,11 +208,27 @@ async function addOrgMember(orgId, profile, role) {
       displayName: profile.displayName || profile.email || 'User',
       photoURL: profile.photoURL || '',
       orgId,
-      orgName: org.orgName || '',
-      orgColor: org.orgColor || ORG_COLORS[0],
+      orgName,
+      orgColor,
       addedBy: currentUser.uid,
       addedAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
+    try {
+      await _writeOrgMembershipMirror(profile.uid, orgId, orgName, orgColor, role, orgDesc);
+    } catch (mirrorErr) {
+      // Mirror failed after the real membership doc succeeded — roll the
+      // membership back too, so we never leave someone added to an org
+      // that they (or its member list) can't actually see reflected.
+      await fbDb.collection('organizations').doc(orgId).collection('members').doc(profile.uid).delete().catch(() => {});
+      throw mirrorErr;
+    }
+    // Keep the org doc's memberCount in sync — leaveAndDeleteOrg() relies
+    // on this being accurate to know whether it's safe to delete the whole
+    // org on a sole member's way out. Best-effort: if this update fails,
+    // the leave flow still self-heals it right before it's needed.
+    await fbDb.collection('organizations').doc(orgId).update({
+      memberCount: firebase.firestore.FieldValue.increment(1),
+    }).catch(() => {});
     await _logOrgActivity(orgId, 'member_added', profile.displayName || profile.email);
     showNotif(`${profile.displayName || profile.email} added as Visitor`, 'success');
     closeOrgAddMemberModal();
@@ -180,6 +241,7 @@ async function addOrgMember(orgId, profile, role) {
 async function changeMemberRole(orgId, uid, newRole) {
   const orgRef = fbDb.collection('organizations').doc(orgId);
   const memberRef = orgRef.collection('members').doc(uid);
+  const mirrorRef = _mirrorOrgMembershipRef(uid, orgId);
   let targetName = '';
   try {
     await fbDb.runTransaction(async tx => {
@@ -201,6 +263,10 @@ async function changeMemberRole(orgId, uid, newRole) {
         tx.update(orgRef, { adminCount });
       }
       tx.update(memberRef, { role: newRole });
+      // Keep the userOrgMemberships mirror's role in sync too — set/merge
+      // rather than update so this self-heals if the mirror was ever
+      // missing for some reason, instead of throwing NOT_FOUND.
+      tx.set(mirrorRef, { role: newRole }, { merge: true });
     });
     await _logOrgActivity(orgId, 'role_changed', `${targetName} → ${ROLE_LABELS[newRole]}`);
     showNotif('Role updated', 'success');
@@ -219,6 +285,7 @@ async function removeOrgMember(orgId, uid, opts) {
   opts = opts || {};
   const orgRef = fbDb.collection('organizations').doc(orgId);
   const memberRef = orgRef.collection('members').doc(uid);
+  const mirrorRef = _mirrorOrgMembershipRef(uid, orgId);
   let targetName = '';
   try {
     await fbDb.runTransaction(async tx => {
@@ -228,12 +295,15 @@ async function removeOrgMember(orgId, uid, opts) {
       const org = orgSnap.data() || {};
       const member = memberSnap.data();
       targetName = member.displayName || member.email || '';
+      const orgUpdates = { memberCount: firebase.firestore.FieldValue.increment(-1) };
       if (member.role === 'admin') {
         const adminCount = org.adminCount || 0;
         if (adminCount <= 1) throw new Error('SOLE_ADMIN');
-        tx.update(orgRef, { adminCount: adminCount - 1 });
+        orgUpdates.adminCount = adminCount - 1;
       }
+      tx.update(orgRef, orgUpdates);
       tx.delete(memberRef);
+      tx.delete(mirrorRef);
     });
     await _logOrgActivity(orgId, opts.isSelfLeave ? 'member_left' : 'member_removed', targetName);
     showNotif(opts.isSelfLeave ? 'You left the organization' : 'Member removed', 'success');
@@ -242,7 +312,7 @@ async function removeOrgMember(orgId, uid, opts) {
     if (e.message === 'SOLE_ADMIN') {
       showNotif(
         opts.isSelfLeave
-          ? 'You are the only Admin — promote someone else before leaving'
+          ? "You can't leave — make at least 1 other Admin for the org before you leave"
           : 'Cannot remove the only Admin',
         'error'
       );
@@ -257,7 +327,51 @@ function confirmRemoveOrgMember(orgId, uid, name) {
   showConfirm('Remove Member', `Remove ${name} from this organization?`, () => removeOrgMember(orgId, uid, {}));
 }
 
+// ── Leave an organization ────────────────────────────────────────────────────
+// Three distinct outcomes, decided from the live member list before we even
+// open a confirm dialog:
+//   1. You're the ONLY member (sole admin by definition) → leaving would
+//      orphan the org, so instead of a normal leave we offer to delete the
+//      whole org, with a second, more explicit confirmation.
+//   2. There are other members but you're the sole Admin → leaving would
+//      leave the org with no one able to manage it; blocked outright with
+//      a clear message telling them what to do first.
+//   3. Anything else (another Admin exists, or you're not an Admin) →
+//      the normal single-confirm leave flow, unchanged.
 function confirmLeaveOrg(orgId) {
+  const members = orgState.currentOrgMembers || [];
+  const me = currentUser && members.find(m => m.id === currentUser.uid);
+  const myRole = me ? me.role : null;
+
+  if (members.length <= 1) {
+    showConfirm(
+      'Leave Organization',
+      `Leave this organization? You'll lose access to its shared plans.`,
+      () => {
+        // showConfirm's OK button runs this callback, THEN hides the
+        // overlay and clears confirmCallback — so a second showConfirm()
+        // called synchronously here would be immediately wiped out by
+        // that hide. Deferring to the next tick lets it settle first.
+        setTimeout(() => {
+          showConfirm(
+            'Delete Organization',
+            `Are you sure? You're the only member — if you leave, this organization will be removed.`,
+            () => leaveAndDeleteOrg(orgId)
+          );
+        }, 150);
+      }
+    );
+    return;
+  }
+
+  if (myRole === 'admin') {
+    const otherAdmins = members.filter(m => m.role === 'admin' && (!currentUser || m.id !== currentUser.uid));
+    if (otherAdmins.length === 0) {
+      showNotif("You can't leave — make at least 1 other Admin for the org before you leave", 'error');
+      return;
+    }
+  }
+
   showConfirm(
     'Leave Organization',
     `Leave this organization? You'll lose access to its shared plans.`,
@@ -265,17 +379,46 @@ function confirmLeaveOrg(orgId) {
   );
 }
 
+// Deletes the org outright as part of leaving it, for the sole-member case
+// only (see confirmLeaveOrg above). Self-heals memberCount/adminCount to
+// their true value first — orgs created before memberCount existed never
+// had it set, and the org-delete Security Rule requires an accurate
+// memberCount <= 1 to allow this. That update, and the transaction that
+// follows, are both covered by firestore.rules' organizations/{orgId}
+// delete rule; see the comments there for exactly how this is permitted.
+async function leaveAndDeleteOrg(orgId) {
+  const orgRef = fbDb.collection('organizations').doc(orgId);
+  const memberRef = orgRef.collection('members').doc(currentUser.uid);
+  const mirrorRef = _mirrorOrgMembershipRef(currentUser.uid, orgId);
+  try {
+    await orgRef.update({ memberCount: 1, adminCount: 1 });
+    await fbDb.runTransaction(async tx => {
+      tx.delete(memberRef);
+      tx.delete(mirrorRef);
+      tx.delete(orgRef);
+    });
+    showNotif('You left — the organization had no other members, so it was removed', 'success');
+    if (orgState.currentOrgId === orgId) backToOrgList();
+  } catch (e) {
+    console.warn(e);
+    showNotif('Could not remove organization', 'error');
+  }
+}
+
 // ── Live listeners ────────────────────────────────────────────────────────────
 
 function startMyOrgsListener() {
   if (orgState._unsubMyOrgs) { orgState._unsubMyOrgs(); orgState._unsubMyOrgs = null; }
   if (!currentUser || !fbDb) { orgState.myOrgs = []; renderOrgList(); return; }
-  orgState._unsubMyOrgs = fbDb.collectionGroup('members')
-    .where('uid', '==', currentUser.uid)
+  // Plain (non-collection-group) query, scoped to this user's own uid via
+  // .doc(uid) — see the note at the top of firestore.rules for why this
+  // replaced the old collectionGroup('members') query, which could never
+  // satisfy the roster-view rule's use of isOrgMember()/exists().
+  orgState._unsubMyOrgs = fbDb.collection('userOrgMemberships').doc(currentUser.uid).collection('orgs')
     .onSnapshot(snap => {
       orgState.myOrgs = snap.docs.map(d => {
         const m = d.data();
-        return { orgId: m.orgId, orgName: m.orgName, orgColor: m.orgColor, role: m.role };
+        return { orgId: m.orgId, orgName: m.orgName, orgColor: m.orgColor, orgDesc: m.orgDesc || '', role: m.role };
       });
       renderOrgList();
       if (orgState.currentOrgId) {
@@ -284,7 +427,10 @@ function startMyOrgsListener() {
         else backToOrgList(); // we were removed/left while viewing it
         renderOrgMemberList(); // role dropdowns/buttons depend on "my role"
       }
-    }, err => console.warn('My orgs listener error:', err));
+    }, err => {
+      console.error('My orgs listener error:', err.code, err.message, err);
+      showNotif(`Could not load your organizations: ${err.code || err.message || 'unknown error'}`, 'error');
+    });
 }
 
 function startOrgMembersListener(orgId) {
@@ -336,7 +482,7 @@ function renderOrgList() {
         <div class="proj-card-icon">🏢</div>
       </div>
       <div class="proj-card-name">${_orgEsc(o.orgName)}</div>
-      <div class="proj-card-meta">${_roleBadgeHTML(o.role)}</div>
+      ${o.orgDesc ? `<div class="proj-card-desc">${_orgEsc(o.orgDesc)}</div>` : ''}
     </div>
   `).join('');
 }
@@ -347,7 +493,11 @@ function renderOrgDetailHeader(mine) {
   const title = document.getElementById('org-page-title');
   const sub = document.getElementById('org-page-subtitle');
   if (title) title.textContent = mine ? mine.orgName : 'Organization';
-  if (sub) sub.innerHTML = mine ? `Your role: ${_roleBadgeHTML(mine.role)}` : '';
+  if (sub) {
+    sub.innerHTML = mine
+      ? `Your role: ${_roleBadgeHTML(mine.role)}${mine.orgDesc ? `<div style="margin-top:4px;color:var(--text-secondary);font-size:12px;font-weight:400">${_orgEsc(mine.orgDesc)}</div>` : ''}`
+      : '';
+  }
 }
 
 function renderOrgMemberList() {
@@ -464,6 +614,8 @@ function backToOrgList() {
 function openOrgCreateModal() {
   if (!currentUser) { showNotif('Sign in to create an organization', 'error'); return; }
   document.getElementById('org-create-name').value = '';
+  const descInput = document.getElementById('org-create-desc');
+  if (descInput) descInput.value = '';
   orgState.selectedCreateColor = ORG_COLORS[0];
   const picker = document.getElementById('org-create-color-picker');
   picker.innerHTML = ORG_COLORS.map(c =>
@@ -577,7 +729,11 @@ function _initOrgModule() {
   document.getElementById('org-create-close')?.addEventListener('click', closeOrgCreateModal);
   document.getElementById('org-create-cancel')?.addEventListener('click', closeOrgCreateModal);
   document.getElementById('org-create-save')?.addEventListener('click', () => {
-    createOrganization(document.getElementById('org-create-name').value, orgState.selectedCreateColor);
+    createOrganization(
+      document.getElementById('org-create-name').value,
+      orgState.selectedCreateColor,
+      document.getElementById('org-create-desc')?.value
+    );
   });
 
   document.getElementById('btn-org-add-member')?.addEventListener('click', openOrgAddMemberModal);

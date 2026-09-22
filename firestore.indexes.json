@@ -2,13 +2,6 @@
   "indexes": [],
   "fieldOverrides": [
     {
-      "collectionGroup": "members",
-      "fieldPath": "uid",
-      "indexes": [
-        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
-      ]
-    },
-    {
       "collectionGroup": "userProfiles",
       "fieldPath": "email",
       "indexes": [

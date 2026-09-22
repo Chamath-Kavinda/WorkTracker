@@ -2817,6 +2817,7 @@ function showNotif(msg, type = 'info') {
 // ── Navigation ────────────────────────────────────────────────────────────────
 function switchPage(page) {
   state.currentPage = page;
+  if (page !== 'planner') stopSharedPlanDataListeners(); // leaving the planner entirely — drop any live shared-plan sync
 
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -3832,6 +3833,7 @@ function formatShortDate(iso) {
 
 // ── Render Projects ───────────────────────────────────────────────────────────
 function renderPlannerProjects() {
+  stopSharedPlanDataListeners(); // leaving a project board (if one was open) — drop any live shared-plan sync
   const grid = document.getElementById('planner-projects-grid');
   grid.innerHTML = '';
 
@@ -3839,6 +3841,7 @@ function renderPlannerProjects() {
   document.getElementById('planner-page-subtitle').textContent = 'Manage your projects and versions';
   document.getElementById('btn-planner-new-label').textContent = 'New Project';
   document.getElementById('btn-planner-back').style.display = 'none';
+  document.getElementById('btn-planner-share').style.display = 'none';
   document.getElementById('planner-projects-view').style.display = '';
   document.getElementById('planner-board-view').style.display = 'none';
   plannerState.currentProjectId = null;
@@ -3924,6 +3927,9 @@ function renderPlannerProjects() {
 // ── Render Board ──────────────────────────────────────────────────────────────
 function openProjectBoard(projectId) {
   plannerState.currentProjectId = projectId;
+  const _proj0 = plannerState.projects.find(p => p.id === projectId);
+  if (_proj0 && _proj0.dataMigrated) startSharedPlanDataListeners(projectId);
+  else stopSharedPlanDataListeners();
   const proj = plannerState.projects.find(p => p.id === projectId);
   if (!proj) return;
 
@@ -3931,6 +3937,7 @@ function openProjectBoard(projectId) {
   document.getElementById('planner-page-subtitle').textContent = 'Project board';
   document.getElementById('btn-planner-new-label').textContent = 'New Version';
   document.getElementById('btn-planner-back').style.display = '';
+  document.getElementById('btn-planner-share').style.display = '';
   document.getElementById('planner-projects-view').style.display = 'none';
   document.getElementById('planner-board-view').style.display = '';
 
@@ -4083,7 +4090,7 @@ function renderBoard() {
                 }
               }
             }
-            savePlannerData();
+            upsertPlannerTask(projectId, task.versionId, task);
             renderBoard();
             renderAll();
           });
@@ -4093,8 +4100,7 @@ function renderBoard() {
           item.querySelector('[data-action="delete-task"]').addEventListener('click', () => {
             if (locked) return;
             showConfirm('Delete Task', `Delete "${task.name}"?`, () => {
-              plannerState.plannerTasks = plannerState.plannerTasks.filter(t => t.id !== task.id);
-              savePlannerData();
+              deletePlannerTask(projectId, task.versionId, task.id);
               renderBoard();
               showNotif('Task deleted', 'info');
             });
@@ -4113,9 +4119,7 @@ function renderBoard() {
       col.querySelector('[data-action="edit-ver"]')?.addEventListener('click', () => openVersionModal(ver.id));
       col.querySelector('[data-action="delete-ver"]').addEventListener('click', () => {
         showConfirm('Delete Version', `Delete "${ver.name}" and all its tasks?`, () => {
-          plannerState.plannerTasks = plannerState.plannerTasks.filter(t => t.versionId !== ver.id);
-          plannerState.versions = plannerState.versions.filter(v => v.id !== ver.id);
-          savePlannerData();
+          deletePlannerVersion(projectId, ver.id);
           renderBoard();
           showNotif('Version deleted', 'info');
         });
@@ -4193,12 +4197,12 @@ function initVersionDrag(board) {
       else board.insertBefore(_verDragSrc, col);
 
       const newCols = [...board.querySelectorAll('.planner-version-col:not(.planner-add-version-col)')];
-      newCols.forEach((c, idx) => {
-        const ver = plannerState.versions.find(v => v.id === c.dataset.verId);
+      const orderedVersionIds = newCols.map(c => c.dataset.verId);
+      orderedVersionIds.forEach((vid, idx) => {
+        const ver = plannerState.versions.find(v => v.id === vid);
         if (ver) ver.order = idx;
       });
-
-      savePlannerData();
+      reorderPlannerVersions(plannerState.currentProjectId, orderedVersionIds);
     });
   });
 }
@@ -4798,6 +4802,11 @@ function initPlanner() {
 
   // Back button
   document.getElementById('btn-planner-back').addEventListener('click', renderPlannerProjects);
+
+  // Share Plan button (Phase 2)
+  document.getElementById('btn-planner-share').addEventListener('click', () => {
+    if (plannerState.currentProjectId) openSharePlanModal(plannerState.currentProjectId);
+  });
 
   // Project modal
   document.getElementById('planner-project-modal-close').addEventListener('click', closePlannerProjectModal);

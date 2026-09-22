@@ -1,22 +1,56 @@
 rules_version = '2';
 // WorkTracker — Firestore Security Rules
 //
-// NOT auto-deployed: this repo has no Firebase CLI / functions setup, so
-// deploy this manually (Firebase Console → Firestore → Rules, or
-// `firebase deploy --only firestore:rules` once `firebase login` /
-// `firebase use worktracker-29228` has been run once).
+// Deploy manually: `firebase login` / `firebase use worktracker-29228` /
+// `firebase deploy --only firestore` after any change to this file.
 //
-// Phase 1 (Organizations foundation) only. Future phases add rules for
-// `plans/*` (Phase 2), `changeRequests`/`requestCounters` (Phase 3),
+// Phase 1 (Organizations foundation) + Phase 2 (Plan sharing) implemented.
+// Future phases add rules for `changeRequests`/`requestCounters` (Phase 3),
 // `presence` (Phase 5), and the `status`/soft-delete fields (Phase 6).
 //
-// NOTE on the org-bootstrap rule below: it relies on writes within a single
-// Firestore batch being evaluated against the database state as it stands
-// after earlier writes in that same batch have applied (org doc created,
-// then its founding-admin member doc created). This is the standard pattern
-// for "create a resource + its owner sub-doc" in one commit, but test it
-// against the Firebase emulator before relying on it in production — batch
-// rule-evaluation ordering has had subtle edge cases across SDK versions.
+// NOTE on org bootstrap (org doc + founding-admin member doc): these are
+// created as TWO SEPARATE, sequentially-awaited writes by createOrganization()
+// in org.js — never in the same batch/transaction. Firestore evaluates every
+// write in a batch against the database state as it stood BEFORE the batch,
+// so a same-batch get() on the org doc from the member-doc's create rule
+// would never see it — confirmed by testing, this previously caused every
+// org creation to fail with permission-denied. Keeping them sequential means
+// the member doc's create rule can genuinely get() the already-committed org
+// doc. If the second write (membership doc) fails for some other reason,
+// the client rolls back the orphaned org doc — see the narrow bootstrap
+// clause on organizations/{orgId}'s delete rule below for what that allows.
+//
+// NOTE on the "my orgs" query (startMyOrgsListener() in org.js) — THIS WAS
+// WRONG TWICE BEFORE, READ CAREFULLY: the query used to be a COLLECTION
+// GROUP query — fbDb.collectionGroup('members').where('uid','==',uid). Two
+// different fixes to the members/{memberUid} read rule were tried and BOTH
+// still failed with permission-denied when actually tested against the
+// running app (isOrgMember(orgId) alone: fails, it self-referentially
+// exists()-checks the same collection group being queried; a path-segment
+// check memberUid==request.auth.uid: also fails; resource.data.uid==
+// request.auth.uid instead: also fails). The reason all three fail is more
+// fundamental than any single rule's wording: Cloud Firestore denies an
+// ENTIRE collection-group list request outright if the applicable rule
+// contains a get()/exists() call ANYWHERE in it — even in an `||` branch
+// that isn't the one satisfying a given document, even if another branch
+// alone is logically sufficient for every document the query could ever
+// return. It does not do per-branch/per-document proof; it's a blanket
+// syntactic check against the rule text, applied only to actual
+// collection-group requests (plain, single-collection queries at a fixed
+// path are NOT subject to this and can use get()/exists() freely — that's
+// why organizations/{orgId}/members' OWN roster listing, which uses
+// isOrgMember(orgId), works fine). Since isOrgMember(orgId) has to stay on
+// members/{memberUid}'s read rule for the roster view, NO version of that
+// rule can ever also satisfy a collection-group query — the two needs are
+// fundamentally incompatible on the same rule.
+//
+// THE ACTUAL FIX: stop using a collection-group query for this at all. See
+// the userOrgMemberships/{uid}/orgs/{orgId} rule block below — org.js
+// writes a denormalized mirror there alongside every write to
+// organizations/{orgId}/members/{uid}, and startMyOrgsListener() queries
+// that instead: fbDb.collection('userOrgMemberships').doc(uid)
+// .collection('orgs') — scoped to one fixed uid from the path, NOT a
+// collection-group query, so the restriction above never applies to it.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -56,26 +90,57 @@ service cloud.firestore {
       allow read: if isOrgMember(orgId);
 
       // Creating the org itself: must self-attribute as creator, and must
-      // start with exactly one Admin (the founding admin doc is created in
-      // the same batch — see createOrganization() in org.js).
+      // start with exactly one Admin. Evaluated in isolation against
+      // request.resource.data only — no get() needed, so this half of
+      // bootstrap always worked even before the fix above.
       allow create: if request.auth != null &&
         request.resource.data.createdBy == request.auth.uid &&
         request.resource.data.adminCount == 1;
 
       // Only an Admin can rename/delete the org or touch adminCount, and
       // adminCount may never drop below 1 — this is what blocks orphaning
-      // the org (no Admin left to manage it).
+      // the org (no Admin left to manage it). memberCount is exempted from
+      // this same floor deliberately — see leaveAndDeleteOrg() in org.js,
+      // which needs to write memberCount:1/adminCount:1 as a self-heal step
+      // right before a sole-member deletes their org (older orgs created
+      // before memberCount existed never had it set).
       allow update: if isOrgAdmin(orgId) && request.resource.data.adminCount >= 1;
-      allow delete: if isOrgAdmin(orgId);
+
+      // Normal delete: any Admin who is the org's ONLY remaining member
+      // (memberCount <= 1 — see leaveAndDeleteOrg() in org.js, the
+      // "leave + delete" flow for a sole-member org) may delete it
+      // outright, same as any other Admin-only destructive action.
+      // Bootstrap-rollback delete: the creator may also delete their own
+      // just-created org doc if its founding-admin membership doc was
+      // never successfully created (i.e. step 2 of createOrganization()
+      // failed after step 1 succeeded) — this narrow clause exists purely
+      // so the client can clean up that orphaned state and never lets
+      // anyone delete an org that already has other members.
+      allow delete: if (isOrgAdmin(orgId) && resource.data.memberCount <= 1) || (
+        request.auth != null &&
+        resource.data.createdBy == request.auth.uid &&
+        !exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid))
+      );
 
       match /members/{memberUid} {
-        allow read: if isOrgMember(orgId);
+        // A user may always read their OWN membership doc (get, or a plain
+        // per-org list) — isOrgMember(orgId) covers reading OTHER members'
+        // docs within an org you already belong to. NOTE: startMyOrgsListener()
+        // in org.js no longer queries this via collectionGroup — see the
+        // userOrgMemberships block below and the top-of-file note for why
+        // that never worked here (isOrgMember's exists() call poisons any
+        // collection-group list on this rule, no matter how this branch is
+        // written). This resource.data.uid check just covers ordinary
+        // single-org reads/lists now, nothing more.
+        allow read: if isOrgMember(orgId) || (request.auth != null && resource.data.uid == request.auth.uid);
 
         allow create: if (
-          // Case A: the founding Admin, created together with the org
-          // itself in the same batch (see comment at top of file).
+          // Case A: the founding Admin. By the time this write happens the
+          // org doc already exists (see the sequential-writes note at the
+          // top of this file), so this get() reliably sees createdBy.
           request.resource.data.role == 'admin' &&
           request.resource.data.uid == request.auth.uid &&
+          memberUid == request.auth.uid &&
           get(/databases/$(database)/documents/organizations/$(orgId)).data.createdBy == request.auth.uid
         ) || (
           // Case B: an existing Admin adding someone else.
@@ -102,6 +167,148 @@ service cloud.firestore {
         allow create: if isOrgMember(orgId) &&
           request.resource.data.actorUid == request.auth.uid;
         allow update, delete: if false; // append-only log
+      }
+    }
+
+    // ── userOrgMemberships (NEW — replaces the collection-group "my orgs"
+    // query) ─────────────────────────────────────────────────────────────
+    // WHY THIS EXISTS: startMyOrgsListener() in org.js originally ran
+    // fbDb.collectionGroup('members').where('uid','==',currentUser.uid) to
+    // list every org the signed-in user belongs to. That is a COLLECTION
+    // GROUP query, and Cloud Firestore has a hard rule for those: if the
+    // applicable security rule contains ANY get()/exists() call ANYWHERE —
+    // even in an unused branch of an `||`, even if another branch alone is
+    // logically sufficient for the documents the query could ever return —
+    // Firestore denies the ENTIRE query outright. It does not attempt to
+    // prove individual branches sufficient on their own; the mere presence
+    // of a dependent lookup in the applicable rule is enough to reject a
+    // collection-group list. organizations/{orgId}/members/{memberUid}'s
+    // read rule uses isOrgMember(orgId), which calls exists() — so no
+    // version of that rule (memberUid-based, resource.data.uid-based, or
+    // both together) can ever satisfy a collection-group list, regardless
+    // of how it's written. This was tested and confirmed twice more after
+    // the two earlier "fixes" documented above — both still failed with
+    // permission-denied for exactly this reason.
+    //
+    // The real fix is to stop using a collection-group query for this at
+    // all. org.js now ALSO writes a denormalized mirror of each membership
+    // to userOrgMemberships/{uid}/orgs/{orgId} — same fields as the
+    // organizations/{orgId}/members/{uid} doc it mirrors — every time that
+    // doc is created, updated (role change), or deleted (removed/left).
+    // startMyOrgsListener() now queries
+    // fbDb.collection('userOrgMemberships').doc(uid).collection('orgs'),
+    // which is a PLAIN (non-collection-group) query scoped to one fixed
+    // uid from the path itself — not a collection-group query — so the
+    // get()/exists() restriction above does not apply to it at all.
+    //
+    // Writes here are never subject to that restriction either way (it
+    // only affects list/query reads), so the write rules below can safely
+    // use isOrgAdmin(orgId) same as the real membership doc's rules do.
+    match /userOrgMemberships/{uid}/orgs/{orgId} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+
+      // Self-writes cover the founding Admin bootstrapping their own org
+      // (see createOrganization() in org.js — same sequential-writes
+      // ordering as the real membership doc, so isOrgAdmin(orgId) would
+      // also work here by that point, but the simpler self-uid check needs
+      // no get() at all and is preferred). isOrgAdmin(orgId) covers an
+      // Admin adding/promoting/demoting someone else into their mirror.
+      allow create, update: if request.auth != null &&
+        (request.auth.uid == uid || isOrgAdmin(orgId));
+
+      // Same actors who may delete/leave the real membership doc
+      // (removeOrgMember() in org.js) may delete its mirror.
+      allow delete: if request.auth != null &&
+        (request.auth.uid == uid || isOrgAdmin(orgId));
+    }
+
+    // ── Plans (NEW — Phase 2) ────────────────────────────────────────────
+    // A Plan is a shared Project (see plans.js / ORGANIZATIONS_AND_ROLES.md
+    // §3). Effective role resolution: directMembers[uid] (explicit, set
+    // per-plan) overrides the attached Organization's role for that uid —
+    // if the uid has no directMembers entry, fall back to their role on
+    // organizations/{plan.orgId}, if any org is attached and they're in it.
+    //
+    // Unlike organizations above, a plan's create rule only ever inspects
+    // request.resource.data (no get() on itself), and its founding-Admin
+    // role is embedded directly in the same document via directMembers —
+    // there is no separate sub-doc write for the creator, so plan creation
+    // does not have the same batch/get() ordering hazard orgs did.
+    function planData(planId) {
+      return get(/databases/$(database)/documents/plans/$(planId)).data;
+    }
+    function planHasDirectRole(planId) {
+      return request.auth != null &&
+        planData(planId).directMembers != null &&
+        request.auth.uid in planData(planId).directMembers;
+    }
+    function planRole(planId) {
+      return request.auth == null ? null : (
+        planHasDirectRole(planId)
+          ? planData(planId).directMembers[request.auth.uid]
+          : (planData(planId).orgId != null && isOrgMember(planData(planId).orgId)
+              ? orgRole(planData(planId).orgId)
+              : null)
+      );
+    }
+    function isPlanMember(planId) {
+      return exists(/databases/$(database)/documents/plans/$(planId)) && planRole(planId) != null;
+    }
+    function isPlanAdmin(planId) {
+      return isPlanMember(planId) && planRole(planId) == 'admin';
+    }
+
+    match /plans/{planId} {
+      // The `!exists(...)` branch is required for ensurePlanDoc() in
+      // plans.js: on a brand-new plan being shared for the first time, the
+      // client's very first call is planRef.get() to check whether the doc
+      // exists yet, BEFORE it has been created. isPlanMember(planId) alone
+      // can never be true for a doc that doesn't exist (its own exists()
+      // check fails), so without this branch that existence check itself
+      // gets denied with permission-denied and the doc never gets created
+      // — confirmed by testing, this is why "Share" previously failed with
+      // "Missing or insufficient permissions" on any plan not already
+      // shared. A get() against a nonexistent doc returns no data either
+      // way, so this leaks nothing.
+      allow read: if request.auth != null &&
+        (!exists(/databases/$(database)/documents/plans/$(planId)) || isPlanMember(planId));
+
+      // Creating a plan: the creator self-attributes as its Admin via
+      // directMembers (see ensurePlanDoc() in plans.js).
+      allow create: if request.auth != null &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.directMembers[request.auth.uid] == 'admin';
+
+      // Only an Admin can rename, attach/detach an Organization, add or
+      // remove members, or change roles — EXCEPT a non-Admin member may
+      // remove only their own directMembers entry to leave the plan
+      // (leavePlan() in plans.js), touching nothing else on the doc. The
+      // sole-Admin-cannot-leave guard is enforced client-side before that
+      // call is made; test this rule against the emulator before relying
+      // on it in production, per the note at the top of this file.
+      allow update: if isPlanAdmin(planId) || (
+        isPlanMember(planId) &&
+        request.auth.uid in resource.data.directMembers &&
+        !(request.auth.uid in request.resource.data.directMembers) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['directMembers'])
+      );
+
+      allow delete: if isPlanAdmin(planId);
+
+      // ── Versions & Tasks (NEW — was missing entirely; every read/write
+      // to these was silently falling through to the deny-all catch-all
+      // at the bottom of this file, which is why shared-plan boards never
+      // loaded). Per §4's permission matrix: any plan member (any role)
+      // can view; only Admin/Planner can add/edit/remove — Developer/
+      // Visitor become read-only-until-Change-Request once Phase 3 lands.
+      match /versions/{versionId} {
+        allow read: if isPlanMember(planId);
+        allow write: if isPlanMember(planId) && planRole(planId) in ['admin', 'planner'];
+
+        match /tasks/{taskId} {
+          allow read: if isPlanMember(planId);
+          allow write: if isPlanMember(planId) && planRole(planId) in ['admin', 'planner'];
+        }
       }
     }
 
